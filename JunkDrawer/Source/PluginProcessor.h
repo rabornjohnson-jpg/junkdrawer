@@ -67,6 +67,14 @@ public:
     float takeInputPeak() noexcept { return inPeak.exchange (0.f); }
     static juce::File recordingsFolder();
 
+    // Lane tools (message thread): copy and paste a lane's 16 steps and its length, nudge values by chance, or put a lane back to plain.
+    struct LaneCopy { int lane = -1, length = 16; std::array<float, jd::kSteps> v {}; };
+    LaneCopy copyLane (int track, int lane) const;
+    bool pasteLane (int track, const LaneCopy& c);                   // only into the same kind of lane
+    static bool canHumanize (int lane) noexcept { return lane == jd::LaneVolume || lane == jd::LaneLength || lane == jd::LaneTime; }
+    bool humanizeLane (int track, int lane);                         // volume, length and timing only
+    void resetLane (int track, int lane);
+
     // Key and note: what a sound is in, and the buttons that bring it to the project key.
     jd::KeyResult trackKey (int track) const { auto d = getTrack (track); return d != nullptr ? d->key : jd::KeyResult(); }
     int projectRoot() const { return juce::roundToInt (state.getRawParameterValue ("key_root")->load()); }

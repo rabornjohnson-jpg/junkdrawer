@@ -932,6 +932,10 @@ struct Liner : juce::Component, juce::FileDragAndDropTarget
         clear.setButtonText ("Clear");    clear.setTooltip ("Take the sound out of this track");
         record.setButtonText ("Record"); record.setTooltip ("Catch something: record from the plugin's audio input into this track");
         for (auto* b : { &browse, &clear, &record }) addAndMakeVisible (*b);
+        laneBtn.setButtonText ("Edit");
+        laneBtn.setTooltip ("Copy this lane to paste on another track, nudge its values a little, or put it back to plain");
+        laneBtn.onClick = [this] { openLaneMenu(); };
+        addAndMakeVisible (laneBtn);
         keyBtn.setTooltip ("The project key. Match and Tune work towards it. Pick No key to tune to the nearest note only.");
         matchBtn.setButtonText ("Match");
         matchBtn.setTooltip ("Shift this whole track into the project key. It sets the track's Tune from the key found in the sound.");
@@ -956,6 +960,7 @@ struct Liner : juce::Component, juce::FileDragAndDropTarget
         clear.onClick = [this] { proc.clearTrack (track); };
         addAndMakeVisible (wave);
         addAndMakeVisible (grid);
+        laneBtn.toFront (false);
 
         static const char* laneNames[] = { "Region", "Volume", "Pitch", "Ratchet", "Direction", "Length", "Chance", "Timing" };
         static const char* laneTips[] = { "Which region plays on each step", "How loud each step is", "Shifts each step up or down in semitones", "Repeats a step 1 to 4 times",
@@ -1008,6 +1013,27 @@ struct Liner : juce::Component, juce::FileDragAndDropTarget
         });
     }
 
+    void openLaneMenu()
+    {
+        const int lane = grid.laneIndex();
+        static const char* names[] = { "region", "volume", "pitch", "ratchet", "direction", "length", "chance", "timing" };
+        juce::PopupMenu m;
+        m.addItem (1, juce::String ("Copy the ") + names[lane] + " lane");
+        m.addItem (2, "Paste", clip.lane == lane);
+        m.addSeparator();
+        m.addItem (3, "Humanize", Proc::canHumanize (lane));
+        m.addItem (4, "Reset to plain");
+        m.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&laneBtn), [this, safe = juce::Component::SafePointer<Liner> (this), lane] (int r)
+        {
+            if (safe == nullptr || r == 0) return;
+            if (r == 1) clip = proc.copyLane (track, lane);
+            else if (r == 2) proc.pasteLane (track, clip);
+            else if (r == 3) proc.humanizeLane (track, lane);
+            else if (r == 4) proc.resetLane (track, lane);
+            repaint();
+        });
+    }
+
     juce::String keyButtonText() const
     {
         const int mode = proc.projectMode();
@@ -1056,7 +1082,7 @@ struct Liner : juce::Component, juce::FileDragAndDropTarget
         if (selected >= regionCount()) pick (regionCount() - 1);
         if (loaded && tag == nullptr) buildTag();
         if (! loaded) tag.reset();
-        for (auto* c : std::initializer_list<juce::Component*> { &wave, &grid, &clear, &less, &more, &tabs[0], &tabs[1], &tabs[2], &tabs[3], &tabs[4], &tabs[5], &tabs[6], &tabs[7], &keyBtn, &matchBtn, &matchAllBtn, tuneKnob.get() })
+        for (auto* c : std::initializer_list<juce::Component*> { &wave, &grid, &clear, &less, &more, &tabs[0], &tabs[1], &tabs[2], &tabs[3], &tabs[4], &tabs[5], &tabs[6], &tabs[7], &keyBtn, &matchBtn, &matchAllBtn, &laneBtn, tuneKnob.get() })
             if (c != nullptr) c->setVisible (loaded);
         keyBtn.setButtonText (keyButtonText());
         matchBtn.setEnabled (loaded && proc.trackKey (track).found);
@@ -1089,6 +1115,7 @@ struct Liner : juce::Component, juce::FileDragAndDropTarget
         less.setBounds (552, 268, 24, 24);
         more.setBounds (610, 268, 24, 24);
         grid.setBounds (16, 300, 656, 102);
+        laneBtn.setBounds (16, 300 + 44, 52, 22);
         if (tag != nullptr) tag->setBounds (getWidth() - 216 - 12, 10, 216, 406);
     }
 
@@ -1101,7 +1128,7 @@ struct Liner : juce::Component, juce::FileDragAndDropTarget
         g.setColour (juce::Colour (0x99281608));
         g.drawRect (r, 1.f);
 
-        padBehind (g, { &keyBtn, &matchAllBtn, &matchBtn, &browse, &record, &clear, &tabs[0], &tabs[1], &tabs[2], &tabs[3], &tabs[4], &tabs[5], &tabs[6], &tabs[7], &less, &more });
+        padBehind (g, { &laneBtn, &keyBtn, &matchAllBtn, &matchBtn, &browse, &record, &clear, &tabs[0], &tabs[1], &tabs[2], &tabs[3], &tabs[4], &tabs[5], &tabs[6], &tabs[7], &less, &more });
 
         auto td = proc.getTrack (track);
         if (td == nullptr && ! recOpen)
@@ -1155,7 +1182,8 @@ struct Liner : juce::Component, juce::FileDragAndDropTarget
     StepGrid grid;
     std::unique_ptr<RegionTag> tag;
     std::array<juce::TextButton, jd::kLanes> tabs;
-    juce::TextButton browse, clear, record, less, more, keyBtn, matchBtn, matchAllBtn;
+    juce::TextButton browse, clear, record, less, more, keyBtn, matchBtn, matchAllBtn, laneBtn;
+    Proc::LaneCopy clip;
     std::unique_ptr<Knob> tuneKnob;
     std::unique_ptr<Watch> wTune, wRoot, wMode;
     RecPanel rec;

@@ -840,6 +840,48 @@ int main()
         check (! proc.tuneRegionToKey (5, 0) && ! proc.matchTrackToKey (5), "an empty track has nothing to tune");
     }
 
+    std::printf ("Lane tools\n");
+    {
+        JunkDrawerProcessor lp;
+        lp.prepareToPlay (48000.0, 256);
+        auto setS = [&] (int tr, int s, int lane, float v) { setP (lp, jd::stepId (tr, s, lane), v); };
+        auto getS = [&] (int tr, int s, int lane) { return lp.state.getRawParameterValue (jd::stepId (tr, s, lane))->load(); };
+        for (int s = 0; s < jd::kSteps; ++s) setS (0, s, jd::LanePitch, (float) (s % 5) - 2.f);
+        setP (lp, jd::laneLenId (0, jd::LanePitch), 12.f);
+        auto clip = lp.copyLane (0, jd::LanePitch);
+        check (clip.lane == jd::LanePitch && clip.length == 12 && clip.v[3] == 1.f, "a lane copies its values and its length");
+        check (lp.pasteLane (1, clip), "and pastes onto another track");
+        bool same = true; for (int s = 0; s < jd::kSteps; ++s) same = same && getS (1, s, jd::LanePitch) == getS (0, s, jd::LanePitch);
+        check (same && lp.laneLength (1, jd::LanePitch) == 12, "values and length arrive as they were");
+        check (getS (1, 0, jd::LaneVolume) == 1.f, "other lanes are untouched");
+        check (! lp.pasteLane (1, JunkDrawerProcessor::LaneCopy()), "an empty clipboard pastes nothing");
+
+        for (int s = 0; s < jd::kSteps; ++s) setS (0, s, jd::LaneVolume, 0.8f);
+        check (lp.humanizeLane (0, jd::LaneVolume), "volume can be humanized");
+        bool moved = false, inRange = true;
+        for (int s = 0; s < jd::kSteps; ++s) { moved = moved || std::abs (getS (0, s, jd::LaneVolume) - 0.8f) > 0.001f; inRange = inRange && std::abs (getS (0, s, jd::LaneVolume) - 0.8f) <= 0.121f; }
+        check (moved && inRange, "each step moves a little, never far");
+        for (int s = 0; s < jd::kSteps; ++s) setS (0, s, jd::LaneVolume, 1.f);
+        lp.humanizeLane (0, jd::LaneVolume);
+        bool capped = true; for (int s = 0; s < jd::kSteps; ++s) capped = capped && getS (0, s, jd::LaneVolume) <= 1.f && getS (0, s, jd::LaneVolume) >= 0.87f;
+        check (capped, "volume never goes past full");
+        check (lp.humanizeLane (0, jd::LaneTime), "timing can be humanized");
+        bool small = true; for (int s = 0; s < jd::kSteps; ++s) small = small && std::abs (getS (0, s, jd::LaneTime)) <= 0.061f;
+        check (small, "by only a few percent");
+        check (! lp.humanizeLane (0, jd::LanePitch) && ! lp.humanizeLane (0, jd::LaneRegion), "pitch and region are not humanized");
+
+        lp.resetLane (0, jd::LaneVolume); lp.resetLane (0, jd::LaneTime); lp.resetLane (0, jd::LanePitch);
+        bool plain = true; for (int s = 0; s < jd::kSteps; ++s) plain = plain && getS (0, s, jd::LaneVolume) == 1.f && getS (0, s, jd::LaneTime) == 0.f && getS (0, s, jd::LanePitch) == 0.f;
+        check (plain, "reset puts a lane back to plain values");
+
+        setP (lp, "t2_regions", 2.f);
+        for (int s = 0; s < jd::kSteps; ++s) setS (0, s, jd::LaneRegion, (float) (s % 6));
+        clip = lp.copyLane (0, jd::LaneRegion);
+        lp.pasteLane (1, clip);
+        bool fits = true; for (int s = 0; s < jd::kSteps; ++s) fits = fits && getS (1, s, jd::LaneRegion) <= 2.f;
+        check (fits, "pasted regions are folded onto the regions the track has");
+    }
+
     std::printf ("Catch Last\n");
     {
         const int T = 6;

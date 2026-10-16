@@ -825,6 +825,63 @@ void JunkDrawerProcessor::updateModulation (int n, double clockBeats, bool runni
 
 //==============================================================================
 //==============================================================================
+// Lane tools
+static float laneDefault (int lane)
+{
+    return lane == jd::LaneVolume || lane == jd::LaneLength || lane == jd::LaneProb || lane == jd::LaneRatchet ? 1.f : 0.f;
+}
+
+JunkDrawerProcessor::LaneCopy JunkDrawerProcessor::copyLane (int track, int lane) const
+{
+    LaneCopy c;
+    if (track < 0 || track >= jd::kTracks || lane < 0 || lane >= jd::kLanes) return c;
+    c.lane = lane;
+    c.length = laneLength (track, lane);
+    for (int s = 0; s < jd::kSteps; ++s) c.v[(size_t) s] = state.getRawParameterValue (jd::stepId (track, s, lane))->load();
+    return c;
+}
+
+bool JunkDrawerProcessor::pasteLane (int track, const LaneCopy& c)
+{
+    if (track < 0 || track >= jd::kTracks || c.lane < 0) return false;
+    for (int s = 0; s < jd::kSteps; ++s) setParam (state, jd::stepId (track, s, c.lane), c.v[(size_t) s]);
+    setParam (state, jd::laneLenId (track, c.lane), (float) c.length);
+    if (c.lane == jd::LaneRegion)                                    // a region number that does not exist here would be silent
+    {
+        const int count = juce::roundToInt (regCount[(size_t) track]->load());
+        for (int s = 0; s < jd::kSteps; ++s)
+            if (c.v[(size_t) s] > (float) count) setParam (state, jd::stepId (track, s, jd::LaneRegion), (float) ((juce::roundToInt (c.v[(size_t) s]) - 1) % juce::jmax (1, count) + 1));
+    }
+    sendChangeMessage();
+    return true;
+}
+
+bool JunkDrawerProcessor::humanizeLane (int track, int lane)
+{
+    if (track < 0 || track >= jd::kTracks || ! canHumanize (lane)) return false;
+    juce::Random rnd;
+    const int len = laneLength (track, lane);
+    for (int s = 0; s < len; ++s)
+    {
+        const auto id = jd::stepId (track, s, lane);
+        const float cur = state.getRawParameterValue (id)->load();
+        const float wiggle = rnd.nextFloat() * 2.f - 1.f;
+        if (lane == jd::LaneVolume)      setParam (state, id, juce::jlimit (0.f, 1.f, cur + wiggle * 0.12f));
+        else if (lane == jd::LaneLength) setParam (state, id, juce::jlimit (0.1f, 1.f, cur + wiggle * 0.12f));
+        else                             setParam (state, id, juce::jlimit (-0.5f, 0.5f, cur + wiggle * 0.06f));
+    }
+    sendChangeMessage();
+    return true;
+}
+
+void JunkDrawerProcessor::resetLane (int track, int lane)
+{
+    if (track < 0 || track >= jd::kTracks || lane < 0 || lane >= jd::kLanes) return;
+    for (int s = 0; s < jd::kSteps; ++s) setParam (state, jd::stepId (track, s, lane), laneDefault (lane));
+    sendChangeMessage();
+}
+
+//==============================================================================
 // Key and note
 jd::PitchResult JunkDrawerProcessor::regionPitch (int track, int region) const
 {

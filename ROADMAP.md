@@ -88,7 +88,7 @@ Step-lane engine, LFO engine, file loading, DAW recording pipeline. Pull these i
 - Polymeter lane lengths.
 - Pattern chaining (8-16 patterns, changes on bar boundaries).
 - Rummage (randomize with locked lanes) and Shake (mutate amount).
-- Copy/paste and humanize for lanes.
+- Copy/paste, humanize (volume, length, timing) and reset for lanes: BUILT (the Edit button beside the step lanes). Paste goes into the same kind of lane on any track.
 
 ### Key and note matching (BUILT)
 - Key found once when a sound loads (pitch-class profile against major and minor; relative keys count as the same). Note found per region on demand (YIN, loudest slices must agree). Both answer "no clear key/note" instead of guessing.
