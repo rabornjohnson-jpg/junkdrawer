@@ -10,8 +10,14 @@ JunkDrawerProcessor::JunkDrawerProcessor()
     jd::registerFormats (formats);
     pVolume = state.getRawParameterValue ("m_volume");
     pPan    = state.getRawParameterValue ("m_pan");
+    pDiv = state.getRawParameterValue ("seq_div");   pBpm = state.getRawParameterValue ("seq_bpm");  pRun = state.getRawParameterValue ("seq_run");
+    pRate = state.getRawParameterValue ("m_rate");   pRateMode = state.getRawParameterValue ("m_ratemode");  pSwing = state.getRawParameterValue ("m_swing");
     for (int t = 0; t < jd::kTracks; ++t)
     {
+        regCount[(size_t) t] = state.getRawParameterValue (jd::trackId (t, "regions"));
+        for (int ln = 0; ln < jd::kLanes; ++ln) laneLen[(size_t) t][(size_t) ln] = state.getRawParameterValue (jd::laneLenId (t, ln));
+        for (int s = 0; s < jd::kSteps; ++s)
+            for (int ln = 0; ln < jd::kLanes; ++ln) sp[(size_t) t][(size_t) s].v[(size_t) ln] = state.getRawParameterValue (jd::stepId (t, s, ln));
         audition[(size_t) t] = 0; playing[(size_t) t] = 0; loadToken[(size_t) t] = 0;
         tp[(size_t) t] = { state.getRawParameterValue (jd::trackId (t, "mute")), state.getRawParameterValue (jd::trackId (t, "solo")),
                            state.getRawParameterValue (jd::trackId (t, "level")), state.getRawParameterValue (jd::trackId (t, "pan")) };
@@ -121,7 +127,7 @@ void JunkDrawerProcessor::publish (int track, std::shared_ptr<const jd::TrackDat
         slots[(size_t) track].hits = std::move (hits);
     }
     saveSamplePaths();
-    if (slice) sliceEqual (track, 4);
+    if (slice) { sliceEqual (track, 4); fillPatternIfEmpty (track); }
 }
 
 void JunkDrawerProcessor::clearTrack (int track)
@@ -246,16 +252,103 @@ void JunkDrawerProcessor::processBlock (juce::AudioBuffer<float>& buf, juce::Mid
         voices[(size_t) t].trigger (std::move (d), s, g, tp[(size_t) t].pan->load());
     }
 
-    // 2. voices (muted tracks are silent; solo silences the rest)
-    for (int t = 0; t < jd::kTracks; ++t)
-    {
-        const bool audible = tp[(size_t) t].mute->load() < 0.5f && (! anySolo || tp[(size_t) t].solo->load() > 0.5f);
-        if (audible) voices[(size_t) t].render (l, r, n);
-        else         voices[(size_t) t].kill();
-        playing[(size_t) t].store (voices[(size_t) t].isActive() ? 1 : 0);
-    }
+    // 2. transport: the host's position when it is playing, otherwise our own clock (standalone, or the Run switch)
+    bool running = false;
+    double ppq0 = 0.0, bpm = pBpm->load();
+    bool hostKnown = false;
+    if (auto* ph = getPlayHead())
+        if (auto pos = ph->getPosition())
+        {
+            hostKnown = true;
+            if (auto b = pos->getBpm()) bpm = *b;
+            if (pos->getIsPlaying())
+            {
+                running = true;
+                if (auto p = pos->getPpqPosition()) ppq0 = *p; else ppq0 = internalPpq;
+            }
+        }
+    if (! hostKnown) { running = pRun->load() > 0.5f; ppq0 = internalPpq; }
+    if (ppq0 < 0.0) running = false;
+    const double dppq = bpm / (60.0 * hostRate);
+    internalPpq = running ? internalPpq + dppq * n : 0.0;
 
-    // 3. master volume and pan, then the meter
+    double rate = pRate->load();
+    if (pRateMode->load() > 0.5f) rate = jd::snapRate (rate);
+    const double beats = jd::stepBeats (juce::roundToInt (pDiv->load()));
+    const double u0 = ppq0 * rate / beats, dU = dppq * rate / beats;
+    const double swing = pSwing->load();
+
+    auto renderVoices = [&] (int from, int to)
+    {
+        if (to <= from) return;
+        for (int t = 0; t < jd::kTracks; ++t)
+        {
+            const bool audible = tp[(size_t) t].mute->load() < 0.5f && (! anySolo || tp[(size_t) t].solo->load() > 0.5f);
+            if (audible) voices[(size_t) t].render (l + from, r + from, to - from);
+            else         voices[(size_t) t].kill();
+        }
+    };
+
+    int segStart = 0;
+    if (running)
+    {
+        for (int i = 0; i < n; ++i)
+        {
+            long long S;
+            double frac;
+            jd::locateStep (u0 + dU * i, swing, S, frac);
+            if (i == 0 || S != seq[0].step) uiStep.store (S, std::memory_order_relaxed);
+
+            std::array<uint8_t, jd::kTracks> action {};                    // 1 = trigger, 2 = release
+            bool any = false;
+            for (int t = 0; t < jd::kTracks; ++t)
+            {
+                auto& q = seq[(size_t) t];
+                if (S != q.step) applyStep (t, q, S);
+                if (q.region == 0) continue;
+                const int sub = juce::jmin (q.ratchet - 1, (int) (frac * q.ratchet));
+                const double subFrac = frac * q.ratchet - sub;
+                if (sub != q.sub)                                          { q.sub = sub; q.released = false; action[(size_t) t] = 1; any = true; }
+                else if (! q.released && ! q.noGate && subFrac >= q.len)  { q.released = true; action[(size_t) t] = 2; any = true; }
+            }
+            if (! any) continue;
+
+            renderVoices (segStart, i);
+            segStart = i;
+            for (int t = 0; t < jd::kTracks; ++t)
+            {
+                auto& q = seq[(size_t) t];
+                if (action[(size_t) t] == 2) { voices[(size_t) t].release(); continue; }
+                if (action[(size_t) t] != 1) continue;
+                std::shared_ptr<const jd::TrackData> d;
+                {
+                    const juce::SpinLock::ScopedTryLockType sl (slotLock);
+                    if (! sl.isLocked()) continue;                         // try again on the next step
+                    d = slots[(size_t) t].data;
+                }
+                if (d == nullptr) continue;
+                auto s = readRegion (t, q.region - 1);
+                s.pitch += q.pitch;
+                if (q.dir == 1) s.reverse = false; else if (q.dir == 2) s.reverse = true;
+                const float g = juce::Decibels::decibelsToGain (tp[(size_t) t].level->load(), -59.f) * q.vol;
+                voices[(size_t) t].trigger (std::move (d), s, g, tp[(size_t) t].pan->load());
+                q.fromSeq = true;
+            }
+        }
+    }
+    else
+    {
+        if (seqWasRunning)
+            for (int t = 0; t < jd::kTracks; ++t) { if (seq[(size_t) t].fromSeq) voices[(size_t) t].release(); seq[(size_t) t].fromSeq = false; seq[(size_t) t].step = -1; }
+        uiStep.store (-1, std::memory_order_relaxed);
+    }
+    seqWasRunning = running;
+
+    // 3. voices (muted tracks are silent; solo silences the rest)
+    renderVoices (segStart, n);
+    for (int t = 0; t < jd::kTracks; ++t) playing[(size_t) t].store (voices[(size_t) t].isActive() ? 1 : 0);
+
+    // 4. master volume and pan, then the meter
     float pl = 0.f, pr = 0.f;
     for (int i = 0; i < n; ++i)
     {
@@ -269,6 +362,38 @@ void JunkDrawerProcessor::processBlock (juce::AudioBuffer<float>& buf, juce::Mid
     }
     if (pl > peakL.load (std::memory_order_relaxed)) peakL.store (pl, std::memory_order_relaxed);
     if (pr > peakR.load (std::memory_order_relaxed)) peakR.store (pr, std::memory_order_relaxed);
+}
+
+// Reads one track's values for a running step number.  Each lane wraps on its own length, so lanes of different lengths drift against each other.
+void JunkDrawerProcessor::applyStep (int t, SeqTrack& q, long long step) const
+{
+    auto at = [&] (int lane)
+    {
+        const int len = juce::jlimit (1, jd::kSteps, juce::roundToInt (laneLen[(size_t) t][(size_t) lane]->load()));
+        const int idx = (int) (((step % len) + len) % len);
+        return sp[(size_t) t][(size_t) idx].v[(size_t) lane]->load();
+    };
+    q.step = step;
+    const int count = juce::roundToInt (regCount[(size_t) t]->load());
+    q.region = juce::roundToInt (at (jd::LaneRegion));
+    if (q.region > count) q.region = 0;
+    q.vol = at (jd::LaneVolume);
+    q.pitch = at (jd::LanePitch);
+    q.ratchet = juce::jlimit (1, 4, juce::roundToInt (at (jd::LaneRatchet)));
+    q.dir = juce::roundToInt (at (jd::LaneDirection));
+    q.len = at (jd::LaneLength);
+    q.sub = -1;
+    q.released = false;
+    q.noGate = q.region > 0 && q.len >= 0.999f && juce::roundToInt (rp[(size_t) t][(size_t) (q.region - 1)].loop->load()) == jd::OneShot;
+}
+
+// A freshly loaded sample gets a simple pattern (the regions in order) so there is something to hear right away.
+void JunkDrawerProcessor::fillPatternIfEmpty (int track)
+{
+    for (int s = 0; s < jd::kSteps; ++s)
+        if (juce::roundToInt (sp[(size_t) track][(size_t) s].v[jd::LaneRegion]->load()) != 0) return;
+    const int count = juce::jmax (1, juce::roundToInt (regCount[(size_t) track]->load()));
+    for (int s = 0; s < jd::kSteps; ++s) setParam (state, jd::stepId (track, s, jd::LaneRegion), (float) (s % count + 1));
 }
 
 juce::AudioProcessorEditor* JunkDrawerProcessor::createEditor() { return new JunkDrawerEditor (*this); }

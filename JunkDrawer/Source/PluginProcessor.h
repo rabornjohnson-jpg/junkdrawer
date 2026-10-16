@@ -1,6 +1,7 @@
 #pragma once
 #include "Params.h"
 #include "Voice.h"
+#include "Sequencer.h"
 
 class JunkDrawerProcessor : public juce::AudioProcessor, public juce::ChangeBroadcaster
 {
@@ -53,7 +54,12 @@ public:
     void stopAudition   (int track)              { audition[(size_t) track].store (200); }
     bool isAuditioning  (int track) const        { return playing[(size_t) track].load(); }
 
+    int laneLength (int track, int lane) const { return juce::jlimit (1, jd::kSteps, juce::roundToInt (state.getRawParameterValue (jd::laneLenId (track, lane))->load())); }
+
     juce::AudioProcessorValueTreeState state;
+
+    // The running step number while the sequencer plays (-1 when stopped).  The editor shows each lane's step as this modulo the lane's length.
+    std::atomic<long long> uiStep { -1 };
 
     // Output peak since the editor last looked (the editor reads and resets these about 30 times a second).
     std::atomic<float> peakL { 0.f }, peakR { 0.f };
@@ -87,6 +93,25 @@ private:
     std::array<TrackPtrs, jd::kTracks> tp {};
     struct RegionPtrs { std::atomic<float> *start, *end, *pitch, *gain, *pan, *cutoff, *reso, *drive, *attack, *decay, *sustain, *release, *loop, *reverse; };
     std::array<std::array<RegionPtrs, jd::kRegions>, jd::kTracks> rp {};
+
+    struct StepPtrs { std::array<std::atomic<float>*, jd::kLanes> v {}; };
+    std::array<std::array<StepPtrs, jd::kSteps>, jd::kTracks> sp {};
+    std::array<std::array<std::atomic<float>*, jd::kLanes>, jd::kTracks> laneLen {};
+    std::array<std::atomic<float>*, jd::kTracks> regCount {};
+    std::atomic<float> *pDiv = nullptr, *pBpm = nullptr, *pRun = nullptr, *pRate = nullptr, *pRateMode = nullptr, *pSwing = nullptr;
+
+    struct SeqTrack
+    {
+        long long step = -1;
+        int region = 0, ratchet = 1, sub = -1, dir = 0;
+        float vol = 1.f, pitch = 0.f, len = 1.f;
+        bool released = true, noGate = false, fromSeq = false;
+    };
+    std::array<SeqTrack, jd::kTracks> seq;
+    double internalPpq = 0.0;
+    bool seqWasRunning = false;
+    void applyStep (int track, SeqTrack& q, long long step) const;
+    void fillPatternIfEmpty (int track);
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (JunkDrawerProcessor)
 };

@@ -12,6 +12,19 @@ inline juce::String trackId (int track, const char* suffix) { return "t" + juce:
 inline juce::String lfoId   (int lfo,   const char* suffix) { return "l" + juce::String (lfo + 1)   + "_" + suffix; }
 
 inline juce::String regionId (int track, int region, const char* suffix) { return "t" + juce::String (track + 1) + "_r" + juce::String (region + 1) + "_" + suffix; }
+// Sequencer lanes.  Every lane has its own length (1-16 steps) and its own 16 step values, so lanes can run against each other.
+enum Lane { LaneRegion, LaneVolume, LanePitch, LaneRatchet, LaneDirection, LaneLength, kLanes };
+constexpr int kSteps = 16;
+inline const char* laneKey (int lane)
+{
+    static const char* k[] = { "region", "vol", "pitch", "ratchet", "dir", "len" };
+    return k[lane];
+}
+inline juce::String stepId (int track, int step, int lane) { return "t" + juce::String (track + 1) + "_s" + juce::String (step + 1) + "_" + laneKey (lane); }
+inline juce::String laneLenId (int track, int lane)        { return "t" + juce::String (track + 1) + "_" + laneKey (lane) + "_n"; }
+inline const juce::StringArray kDirections { "Region", "Fwd", "Rev" };
+inline const juce::StringArray kStepDivs   { "1/4", "1/8", "1/16", "1/32" };
+
 inline const juce::StringArray kLoopModes { "One-shot", "Loop", "Ping-pong" };
 
 inline const juce::StringArray kLfoShapes   { "Sine", "Tri", "Saw", "Sq", "S+H", "Rand", "Drift" };
@@ -135,7 +148,12 @@ inline juce::AudioProcessorValueTreeState::ParameterLayout createLayout()
 
     addChoice (l, "snap", "Snap region edges", { "Off", "Hit", "Zero" }, 1);
 
-    // ---- Tracks (mute, solo, level, pan; regions and steps arrive in Stages 2 and 3) ------------------------------
+    // ---- Sequencer (global) ---------------------------------------------------------------------------------------
+    addChoice (l, "seq_div", "Step length", kStepDivs, 2);
+    addFloat  (l, "seq_bpm", "Tempo without a host", { 40.f, 240.f, 0.1f }, 120.f, fmt (" BPM", 1));
+    addBool   (l, "seq_run", "Run without a host", false);
+
+    // ---- Tracks (mute, solo, level, pan; regions and steps arrive in Stage 3) ------------------------------
     for (int t = 0; t < kTracks; ++t)
     {
         const juce::String n = "Track " + juce::String (t + 1) + " ";
@@ -162,6 +180,19 @@ inline juce::AudioProcessorValueTreeState::ParameterLayout createLayout()
             addFloat  (l, regionId (t, r, "release"),rn + "release", skewed (3.f, 5000.f, 300.f), 50.f, ms());
             addChoice (l, regionId (t, r, "loop"),   rn + "loop mode", kLoopModes, 0);
             addBool   (l, regionId (t, r, "reverse"),rn + "reverse", false);
+        }
+
+        for (int ln = 0; ln < kLanes; ++ln)
+            l.add (std::make_unique<juce::AudioParameterInt> (juce::ParameterID { laneLenId (t, ln), 1 }, n + laneKey (ln) + " lane steps", 1, kSteps, kSteps));
+        for (int s = 0; s < kSteps; ++s)
+        {
+            const juce::String sn = n + "step " + juce::String (s + 1) + " ";
+            l.add (std::make_unique<juce::AudioParameterInt> (juce::ParameterID { stepId (t, s, LaneRegion), 1 }, sn + "region", 0, kRegions, 0));
+            addFloat  (l, stepId (t, s, LaneVolume),  sn + "volume",  { 0.f, 1.f, 0.001f }, 1.f, pct());
+            addFloat  (l, stepId (t, s, LanePitch),   sn + "pitch",   { -12.f, 12.f, 1.f }, 0.f, semis());
+            l.add (std::make_unique<juce::AudioParameterInt> (juce::ParameterID { stepId (t, s, LaneRatchet), 1 }, sn + "ratchet", 1, 4, 1));
+            addChoice (l, stepId (t, s, LaneDirection), sn + "direction", kDirections, 0);
+            addFloat  (l, stepId (t, s, LaneLength),  sn + "length",  { 0.1f, 1.f, 0.001f }, 1.f, pct());
         }
     }
 

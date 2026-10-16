@@ -207,6 +207,97 @@ int main()
     check (waitForTrack (proc2, 0), "a saved project reloads its samples");
     check (std::abs (proc2.state.getRawParameterValue ("t1_r2_start")->load() - 0.25f) < 1.0e-4f, "and its regions");
 
+    // ------------------------------------------------------------------------------------------------------------
+    std::printf ("Sequencer\n");
+    {
+        long long s; double f;
+        jd::locateStep (3.5, 0.5, s, f);
+        check (s == 3 && std::abs (f - 0.5) < 1.0e-9, "straight timing: halfway through step 4");
+        jd::locateStep (1.0, 0.75, s, f);
+        check (s == 0 && std::abs (f - 2.0 / 3.0) < 1.0e-9, "with swing the first step runs long");
+        jd::locateStep (1.5, 0.75, s, f);
+        check (s == 1 && std::abs (f) < 1.0e-9, "and the second step starts three quarters of the way through the pair");
+        check (jd::snapRate (0.8) == 1.0 && jd::snapRate (3.0) == 4.0 && jd::snapRate (0.3) == 0.25, "sync snaps the rate to the five allowed values");
+    }
+
+    // a 20 ms tone, so every trigger is a short burst we can find
+    juce::File tone = juce::File::getSpecialLocation (juce::File::tempDirectory).getChildFile ("jd_test_tone.wav");
+    {
+        tone.deleteFile();
+        juce::WavAudioFormat fmt;
+        std::unique_ptr<juce::AudioFormatWriter> w (fmt.createWriterFor (new juce::FileOutputStream (tone), rate, 2, 16, {}, 0));
+        const int n = (int) (rate * 0.02);
+        juce::AudioBuffer<float> b (2, n);
+        for (int i = 0; i < n; ++i) for (int ch = 0; ch < 2; ++ch) b.setSample (ch, i, 0.6f * std::sin (i * 0.1f));
+        w->writeFromAudioSampleBuffer (b, 0, n);
+    }
+    JunkDrawerProcessor sq;
+    sq.prepareToPlay (rate, 256);
+    setP (sq, "m_volume", 0.f);
+    setP (sq, "seq_bpm", 120.f);                                  // 1/16 steps are then 6000 samples long at 48 kHz
+    sq.loadFile (0, tone);
+    check (waitForTrack (sq, 0), "the tone loads");
+    sq.sliceEqual (0, 1);
+    auto onlySteps = [&] (std::initializer_list<int> on)
+    {
+        for (int s = 0; s < jd::kSteps; ++s) setP (sq, jd::stepId (0, s, jd::LaneRegion), 0.f);
+        for (int s : on) setP (sq, jd::stepId (0, s, jd::LaneRegion), 1.f);
+    };
+    auto win = [&] (const juce::AudioBuffer<float>& b, int a, int z)
+    {
+        juce::AudioBuffer<float> v (const_cast<float**> (b.getArrayOfReadPointers()), 2, a, z - a);
+        return rms (v);
+    };
+
+    onlySteps ({ 0, 2 });
+    check (rms (run (sq, 0.2, rate)) < 1.0e-6f, "nothing plays until the sequencer runs");
+    setP (sq, "seq_run", 1.f);
+    o = run (sq, 0.4, rate);
+    check (win (o, 0, 600) > 0.05f && win (o, 1500, 11800) < 1.0e-5f, "step 1 plays at the start and then goes quiet");
+    check (win (o, 11000, 11900) < 1.0e-5f && win (o, 12100, 12900) > 0.05f, "step 3 starts exactly 12000 samples in");
+
+    setP (sq, "seq_run", 0.f);
+    run (sq, 0.1, rate);
+    setP (sq, "seq_run", 1.f);
+    onlySteps ({ 0 });
+    setP (sq, jd::stepId (0, 0, jd::LaneRatchet), 4.f);
+    o = run (sq, 0.2, rate);
+    check (win (o, 100, 900) > 0.05f && win (o, 1100, 1450) < 1.0e-5f && win (o, 1600, 2300) > 0.05f && win (o, 3100, 3800) > 0.05f && win (o, 4600, 5300) > 0.05f, "a ratchet of 4 plays four hits inside the step");
+    setP (sq, jd::stepId (0, 0, jd::LaneRatchet), 1.f);
+
+    setP (sq, "seq_run", 0.f); run (sq, 0.1, rate); setP (sq, "seq_run", 1.f);
+    onlySteps ({ 0, 1 });
+    setP (sq, "m_swing", 0.75f);
+    o = run (sq, 0.4, rate);
+    check (win (o, 8000, 8950) < 1.0e-5f && win (o, 9100, 9800) > 0.05f, "swing pushes the second step of a pair later (9000 instead of 6000)");
+    setP (sq, "m_swing", 0.5f);
+
+    setP (sq, "seq_run", 0.f); run (sq, 0.1, rate); setP (sq, "seq_run", 1.f);
+    setP (sq, "m_rate", 2.f);
+    o = run (sq, 0.4, rate);
+    check (win (o, 2800, 2990) < 1.0e-5f && win (o, 3100, 3800) > 0.05f, "a rate of 2x makes steps half as long");
+    setP (sq, "m_rate", 1.f);
+
+    // lanes run on their own lengths: the volume lane has 2 steps while the region lane has 16
+    setP (sq, "seq_run", 0.f); run (sq, 0.1, rate); setP (sq, "seq_run", 1.f);
+    for (int s = 0; s < jd::kSteps; ++s) setP (sq, jd::stepId (0, s, jd::LaneRegion), 1.f);
+    setP (sq, jd::laneLenId (0, jd::LaneVolume), 2.f);
+    setP (sq, jd::stepId (0, 0, jd::LaneVolume), 1.f);
+    setP (sq, jd::stepId (0, 1, jd::LaneVolume), 0.f);
+    o = run (sq, 0.6, rate);
+    check (win (o, 100, 900) > 0.05f && win (o, 6100, 6900) < 1.0e-5f && win (o, 12100, 12900) > 0.05f && win (o, 18100, 18900) < 1.0e-5f, "a 2-step volume lane alternates loud and silent against a 16-step region lane");
+    setP (sq, jd::laneLenId (0, jd::LaneVolume), 16.f);
+
+    setP (sq, "seq_run", 0.f); run (sq, 0.1, rate); setP (sq, "seq_run", 1.f);
+    setP (sq, jd::laneLenId (0, jd::LaneRegion), 3.f);
+    for (int s = 0; s < jd::kSteps; ++s) setP (sq, jd::stepId (0, s, jd::LaneRegion), s == 2 ? 1.f : 0.f);
+    o = run (sq, 0.8, rate);
+    check (win (o, 12100, 12900) > 0.05f && win (o, 18100, 18900) < 1.0e-5f && win (o, 30100, 30900) > 0.05f, "a 3-step region lane repeats its third step every 18000 samples");
+    setP (sq, jd::laneLenId (0, jd::LaneRegion), 16.f);
+    setP (sq, "seq_run", 0.f);
+    check (rms (run (sq, 0.2, rate)) < 1.0e-5f, "stopping the sequencer silences it");
+    check (sq.uiStep.load() == -1, "and the editor sees it stopped");
+
     proc.clearTrack (0);
     check (proc.getTrack (0) == nullptr, "clearing a track empties it");
 

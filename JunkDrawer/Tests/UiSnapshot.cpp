@@ -112,9 +112,14 @@ int main (int argc, char** argv)
         }
         w->writeFromAudioSampleBuffer (b, 0, n);
         w.reset();
-        proc.loadFile (0, wav, false);
+        proc.loadFile (0, wav);
         for (int i = 0; i < 100 && proc.getTrack (0) == nullptr; ++i) juce::MessageManager::getInstance()->runDispatchLoopUntil (50);
         proc.sliceByHits (0, 6);
+        auto setP = [&] (const juce::String& id, float v) { auto* q = proc.state.getParameter (id); q->setValueNotifyingHost (q->convertTo0to1 (v)); };
+        const int pattern[] = { 1, 0, 3, 2, 0, 4, 1, 5, 0, 6, 2, 0, 3, 1, 4, 0 };
+        for (int s = 0; s < 16; ++s) setP (jd::stepId (0, s, jd::LaneRegion), (float) pattern[s]);
+        for (int s = 0; s < 16; ++s) setP (jd::stepId (0, s, jd::LaneVolume), 0.35f + 0.65f * (float) ((s * 5) % 7) / 6.f);
+        setP (jd::laneLenId (0, jd::LaneVolume), 12.f);
         editor->showPage (0);
         for (int i = 0; i < 6; ++i) juce::MessageManager::getInstance()->runDispatchLoopUntil (40);
     }
