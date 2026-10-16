@@ -164,7 +164,7 @@ struct JunkDrawerEditor::Header : juce::Component, juce::Timer, juce::ChangeList
     }
 
     ~Header() override { ed.proc.removeChangeListener (this); }
-    void changeListenerCallback (juce::ChangeBroadcaster*) override { repaint (bpmArea()); }
+    void changeListenerCallback (juce::ChangeBroadcaster*) override { repaint(); }
     void select (int i) { tabs[(size_t) i].setToggleState (true, juce::dontSendNotification); }
 
     void resized() override
@@ -184,6 +184,57 @@ struct JunkDrawerEditor::Header : juce::Component, juce::Timer, juce::ChangeList
         if (std::abs (tempo - bpm) > 0.001) { bpm = tempo; repaint (bpmArea()); }
     }
 
+    void mouseUp (const juce::MouseEvent& e) override
+    {
+        if (e.mouseWasDraggedSinceMouseDown() || ! barArea().contains (e.getPosition())) return;
+        if (e.x < barArea().getX() + 30) ed.proc.stepDrawer (-1);
+        else if (e.x > barArea().getRight() - 30) ed.proc.stepDrawer (1);
+        else openMenu();
+    }
+    void mouseMove (const juce::MouseEvent& e) override { setMouseCursor (barArea().contains (e.getPosition()) ? juce::MouseCursor::PointingHandCursor : juce::MouseCursor::NormalCursor); }
+
+    juce::Rectangle<int> barArea() const { return { 648, 11, 268, 30 }; }
+
+    void openMenu()
+    {
+        juce::PopupMenu m;
+        for (int gI = 0; gI < jdp::kGroups.size(); ++gI)
+        {
+            juce::PopupMenu sub;
+            for (int k = 0; k < 10; ++k)
+                sub.addItem (gI * 10 + k + 1, ed.proc.drawer (gI * 10 + k).name, true, ed.proc.currentDrawer() == gI * 10 + k);
+            m.addSubMenu (jdp::kGroups[gI], sub);
+        }
+        if (ed.proc.drawerCount() > 100)
+        {
+            juce::PopupMenu mine;
+            for (int i = 100; i < ed.proc.drawerCount(); ++i) mine.addItem (i + 1, ed.proc.drawer (i).name, true, ed.proc.currentDrawer() == i);
+            m.addSubMenu ("Mine", mine);
+        }
+        m.addSeparator();
+        m.addItem (100000, "Save this drawer as...");
+        m.showMenuAsync (juce::PopupMenu::Options().withTargetScreenArea (localAreaToGlobal (barArea())).withMinimumWidth (barArea().getWidth()),
+                         [this, safe = juce::Component::SafePointer<Header> (this)] (int r)
+        {
+            if (safe == nullptr || r == 0) return;
+            if (r == 100000) { askName(); return; }
+            ed.proc.loadDrawer (r - 1);
+        });
+    }
+
+    void askName()
+    {
+        auto* w = new juce::AlertWindow ("Save this drawer", "Give it a name. It will show up under Mine.", juce::MessageBoxIconType::NoIcon);
+        w->addTextEditor ("name", "", "");
+        w->addButton ("Save", 1, juce::KeyPress (juce::KeyPress::returnKey));
+        w->addButton ("Cancel", 0, juce::KeyPress (juce::KeyPress::escapeKey));
+        w->enterModalState (true, juce::ModalCallbackFunction::create ([this, safe = juce::Component::SafePointer<Header> (this), w] (int r)
+        {
+            if (r == 1 && safe != nullptr) ed.proc.saveDrawer (w->getTextEditorContents ("name"));
+            delete w;
+        }), false);
+    }
+
     juce::Rectangle<int> bpmArea() const { return { getWidth() - 24 - 110 - 14 - 110, 12, 110, 28 }; }
 
     void paint (juce::Graphics& g) override
@@ -199,7 +250,9 @@ struct JunkDrawerEditor::Header : juce::Component, juce::Timer, juce::ChangeList
         g.drawRoundedRectangle (bar.reduced (0.5f), 15.f, 1.f);
         drawText (g, juce::String::charToString (0x2039), bar.toNearestInt().removeFromLeft (30), sans (16.f), pal::amber.withAlpha (0.4f), juce::Justification::centred);
         drawText (g, juce::String::charToString (0x203a), bar.toNearestInt().removeFromRight (30), sans (16.f), pal::amber.withAlpha (0.4f), juce::Justification::centred);
-        drawText (g, juce::String ("Drawer 001 ") + juce::String::charToString (0x00b7) + " Empty drawer", bar.toNearestInt().reduced (32, 0), serif (15.f, false), pal::text, juce::Justification::centred);
+        const int cur = ed.proc.currentDrawer();
+        const auto label = cur < 0 ? juce::String ("Pick a drawer") : juce::String (cur + 1).paddedLeft ('0', 3) + " " + juce::String::charToString (0x00b7) + " " + ed.proc.drawer (cur).name;
+        drawText (g, label, bar.toNearestInt().reduced (32, 0), serif (15.f, false), cur < 0 ? pal::textDim : pal::text, juce::Justification::centred);
 
         if (ed.proc.armedLfo() >= 0)
         {

@@ -1,3 +1,4 @@
+#include <set>
 // Headless checks of the sample engine: loading, resampling, hit detection, regions, voices and mute/solo.
 // Usage: JunkEngineTest   (exit code 0 when every check passes)
 #include "PluginEditor.h"
@@ -704,6 +705,34 @@ int main()
         check (steps (jd::LanePitch) == before, "shaking with the amount at zero changes nothing");
         proc.rummage (0);
         check (steps (jd::LaneVolume) != std::vector<float> (jd::kSteps, 0.3f), "an unkept lane gets re-rolled");
+    }
+
+    std::printf ("Drawers\n");
+    {
+        check (proc.drawerCount() >= 100, "100 factory drawers");
+        std::set<juce::String> names; bool allNamed = true;
+        for (int i = 0; i < 100; ++i) { names.insert (proc.drawer (i).name); allNamed = allNamed && proc.drawer (i).name.isNotEmpty(); }
+        check (allNamed && names.size() == 100, "every factory drawer has its own name");
+        bool banned = false;
+        for (auto& n : names) banned = banned || n.containsIgnoreCase ("rubber");
+        check (! banned, "no banned words in names");
+        for (int i = 0; i < 100; ++i) if (proc.drawer (i).mods.empty()) { check (false, "each drawer hooks up at least one LFO"); break; }
+        setP (proc, "t1_regions", 5.f);
+        proc.loadDrawer (7);
+        check (proc.currentDrawer() == 7, "loading a drawer remembers which one");
+        check (juce::roundToInt (proc.state.getRawParameterValue ("t1_regions")->load()) == 5, "a drawer leaves the number of regions alone");
+        check (! proc.modAmount ("fx_filter_cut", 0) == false || proc.drawer (7).mods.size() > 0, "drawer mods applied");
+        bool differs = false;
+        for (int i = 8; i < 14; ++i) { proc.loadDrawer (i); differs = differs || proc.state.getRawParameterValue ("fx_filter_cut")->load() != proc.drawer (7).values.at ("fx_filter_cut"); }
+        check (differs, "different drawers load different settings");
+        setP (proc, "t2_level", -33.f);
+        proc.loadDrawer (7);
+        check (std::abs (proc.state.getRawParameterValue ("t2_level")->load() - proc.drawer (7).values.at ("t2_level")) < 0.05f, "loading overwrites earlier edits");
+        proc.stepDrawer (1);
+        check (proc.currentDrawer() == 8, "next steps forward");
+        proc.stepDrawer (-1); proc.stepDrawer (-8);
+        check (proc.currentDrawer() == proc.drawerCount() - 1, "previous wraps around");
+        check (proc.getNumPrograms() == proc.drawerCount() && proc.getProgramName (0).isNotEmpty(), "hosts see the drawers as programs");
     }
 
     proc.clearTrack (0);

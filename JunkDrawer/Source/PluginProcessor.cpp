@@ -8,6 +8,7 @@ JunkDrawerProcessor::JunkDrawerProcessor()
       state (*this, nullptr, "JunkDrawer", jd::createLayout())
 {
     jd::registerFormats (formats);
+    reloadUserDrawers();
     pVolume = state.getRawParameterValue ("m_volume");
     pPan    = state.getRawParameterValue ("m_pan");
     pDiv = state.getRawParameterValue ("seq_div");   pFeel = state.getRawParameterValue ("seq_feel");   pBpm = state.getRawParameterValue ("seq_bpm");  pRun = state.getRawParameterValue ("seq_run");
@@ -717,6 +718,49 @@ void JunkDrawerProcessor::updateModulation (int n, double clockBeats, bool runni
 }
 
 //==============================================================================
+//==============================================================================
+// Drawers
+void JunkDrawerProcessor::reloadUserDrawers() { userDrawers = jdp::loadUser(); }
+
+void JunkDrawerProcessor::loadDrawer (int index)
+{
+    if (index < 0 || index >= drawerCount()) return;
+    const auto& d = drawer (index);
+    for (auto* p : getParameters())
+        if (auto* rp = dynamic_cast<juce::RangedAudioParameter*> (p))
+        {
+            const auto id = rp->getParameterID();
+            if (jdp::isSoundSpecific (id)) continue;
+            const auto it = d.values.find (id);
+            const float v01 = it != d.values.end() ? rp->convertTo0to1 (it->second) : rp->getDefaultValue();
+            if (std::abs (rp->getValue() - v01) > 1.0e-6f) { rp->beginChangeGesture(); rp->setValueNotifyingHost (v01); rp->endChangeGesture(); }
+        }
+    mods = d.mods;
+    publishMods();
+    drawerIndex = index;
+    state.state.setProperty ("drawer", index, nullptr);
+    sendChangeMessage();
+}
+
+bool JunkDrawerProcessor::saveDrawer (const juce::String& name)
+{
+    if (name.trim().isEmpty()) return false;
+    jdp::Drawer d;
+    d.name = name.trim(); d.group = "Mine";
+    for (auto* p : getParameters())
+        if (auto* rp = dynamic_cast<juce::RangedAudioParameter*> (p))
+            if (! jdp::isSoundSpecific (rp->getParameterID()))
+                d.values[rp->getParameterID()] = rp->convertFrom0to1 (rp->getValue());
+    d.mods = mods;
+    if (! jdp::saveUser (d)) return false;
+    reloadUserDrawers();
+    for (size_t i = 0; i < userDrawers.size(); ++i)
+        if (userDrawers[i].name == d.name) drawerIndex = 100 + (int) i;
+    state.state.setProperty ("drawer", drawerIndex, nullptr);
+    sendChangeMessage();
+    return true;
+}
+
 void JunkDrawerProcessor::publishMods()
 {
     auto t = std::make_shared<jd::ModTable>();
@@ -809,6 +853,7 @@ void JunkDrawerProcessor::setStateInformation (const void* data, int size)
         {
             state.replaceState (juce::ValueTree::fromXml (*xml));
             loadMods();
+            drawerIndex = juce::jlimit (-1, drawerCount() - 1, (int) state.state.getProperty ("drawer", -1));
             auto node = state.state.getChildWithName ("samples");
             for (int t = 0; t < jd::kTracks; ++t)
             {

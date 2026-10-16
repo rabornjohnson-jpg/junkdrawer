@@ -1,5 +1,6 @@
 #pragma once
 #include "Params.h"
+#include "Presets.h"
 #include "Voice.h"
 #include "Sequencer.h"
 #include "Effects.h"
@@ -25,10 +26,10 @@ public:
     bool producesMidi() const override { return false; }
     double getTailLengthSeconds() const override { return 0.0; }
 
-    int getNumPrograms() override { return 1; }
-    int getCurrentProgram() override { return 0; }
-    void setCurrentProgram (int) override {}
-    const juce::String getProgramName (int) override { return {}; }
+    int getNumPrograms() override { return drawerCount(); }
+    int getCurrentProgram() override { return juce::jmax (0, drawerIndex); }
+    void setCurrentProgram (int i) override { loadDrawer (i); }
+    const juce::String getProgramName (int i) override { return i >= 0 && i < drawerCount() ? drawer (i).name : juce::String(); }
     void changeProgramName (int, const juce::String&) override {}
 
     void getStateInformation (juce::MemoryBlock&) override;
@@ -65,6 +66,15 @@ public:
     void setInputMeter (bool on) noexcept { meterOn = on; }
     float takeInputPeak() noexcept { return inPeak.exchange (0.f); }
     static juce::File recordingsFolder();
+
+    // Drawers (presets): 100 factory drawers first, then the ones the person saved.
+    int drawerCount() const { return 100 + (int) userDrawers.size(); }
+    const jdp::Drawer& drawer (int i) const { return i < 100 ? jdp::factory()[(size_t) i] : userDrawers[(size_t) (i - 100)]; }
+    int  currentDrawer() const noexcept { return drawerIndex; }          // -1 when nothing has been picked
+    void loadDrawer (int index);
+    void stepDrawer (int by) { const int n = drawerCount(); loadDrawer (((drawerIndex < 0 ? (by > 0 ? -1 : 0) : drawerIndex) + by + n) % n); }
+    bool saveDrawer (const juce::String& name);
+    void reloadUserDrawers();
 
     // Offline export support: an export runs a second processor of its own (see Exporter.h).
     void importSettings (const juce::ValueTree& tree) { state.replaceState (tree); loadMods(); }
@@ -147,6 +157,8 @@ private:
     std::vector<jd::Assign> mods;                                      // message thread
     int armed = -1;
     void publishMods();
+    std::vector<jdp::Drawer> userDrawers;
+    int drawerIndex = -1;
     void saveMods();
     void loadMods();
     mutable juce::SpinLock modLock;
