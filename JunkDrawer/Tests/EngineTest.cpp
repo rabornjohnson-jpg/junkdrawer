@@ -331,6 +331,25 @@ int main()
         setP (sq, "seq_run", 0.f);
     }
 
+    // ratchet shape
+    {
+        auto restart = [&] { setP (sq, "seq_run", 0.f); run (sq, 0.1, rate); setP (sq, "seq_run", 1.f); };
+        onlySteps ({ 0 });
+        setP (sq, jd::stepId (0, 0, jd::LaneRatchet), 4.f);
+        setP (sq, jd::trackId (0, "rshape"), 1.f);                            // fade out
+        restart();
+        o = run (sq, 0.2, rate);
+        check (win (o, 100, 900) > win (o, 4600, 5300) * 1.8f && win (o, 4600, 5300) > 0.01f, "a fading ratchet gets quieter with each repeat");
+        setP (sq, jd::trackId (0, "rshape"), 2.f);                            // swell
+        restart();
+        o = run (sq, 0.2, rate);
+        check (win (o, 4600, 5300) > win (o, 100, 900) * 1.8f, "a swelling ratchet gets louder with each repeat");
+        setP (sq, jd::trackId (0, "rshape"), 0.f);
+        setP (sq, jd::stepId (0, 0, jd::LaneRatchet), 1.f);
+        onlySteps ({ 0, 2 });
+        setP (sq, "seq_run", 0.f);
+    }
+
     // loop conditions (the Region lane is 16 steps, so a pass is 96000 samples at 120 BPM)
     {
         auto restart = [&] { setP (sq, "seq_run", 0.f); run (sq, 0.1, rate); setP (sq, "seq_run", 1.f); };

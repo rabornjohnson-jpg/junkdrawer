@@ -39,7 +39,7 @@ JunkDrawerProcessor::JunkDrawerProcessor()
         audition[(size_t) t] = 0; playing[(size_t) t] = 0; loadToken[(size_t) t] = 0;
         tp[(size_t) t] = { state.getRawParameterValue (jd::trackId (t, "mute")), state.getRawParameterValue (jd::trackId (t, "solo")),
                            state.getRawParameterValue (jd::trackId (t, "level")), state.getRawParameterValue (jd::trackId (t, "pan")),
-                           state.getRawParameterValue (jd::trackId (t, "tune")), state.getRawParameterValue (jd::trackId (t, "order")), state.getRawParameterValue (jd::trackId (t, "cond")) };
+                           state.getRawParameterValue (jd::trackId (t, "tune")), state.getRawParameterValue (jd::trackId (t, "order")), state.getRawParameterValue (jd::trackId (t, "cond")), state.getRawParameterValue (jd::trackId (t, "rshape")) };
         for (int r = 0; r < jd::kRegions; ++r)
         {
             auto g = [&] (const char* s) { return state.getRawParameterValue (jd::regionId (t, r, s)); };
@@ -442,7 +442,17 @@ void JunkDrawerProcessor::processBlock (juce::AudioBuffer<float>& buf, juce::Mid
                 auto s = readRegion (t, q.region - 1);
                 s.pitch += q.pitch + masterPitch + v (tp[(size_t) t].tune);
                 if (q.dir == 1) s.reverse = false; else if (q.dir == 2) s.reverse = true;
-                const float g = juce::Decibels::decibelsToGain (v (tp[(size_t) t].level), -59.f) * q.vol;
+                float shapeGain = 1.f;
+                if (q.ratchet > 1)
+                {
+                    // Ratchet shape: how the repeats inside one step differ from each other.
+                    const int shape = juce::roundToInt (tp[(size_t) t].rshape->load());
+                    const float k = (float) juce::jmax (0, q.sub) / (float) (q.ratchet - 1);
+                    if (shape == 1) shapeGain = 1.f - 0.7f * k;
+                    else if (shape == 2) shapeGain = 0.3f + 0.7f * k;
+                    else if (shape == 3) s.pitch += 2.f * (float) juce::jmax (0, q.sub);
+                }
+                const float g = juce::Decibels::decibelsToGain (v (tp[(size_t) t].level), -59.f) * q.vol * shapeGain;
                 voices[(size_t) t].trigger (std::move (d), s, g, v (tp[(size_t) t].pan));
                 q.fromSeq = true;
             }

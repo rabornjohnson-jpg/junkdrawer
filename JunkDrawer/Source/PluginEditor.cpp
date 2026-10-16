@@ -1036,6 +1036,11 @@ struct Liner : juce::Component, juce::FileDragAndDropTarget
         const int curOrder = juce::roundToInt (proc.state.getRawParameterValue (jd::trackId (track, "order"))->load());
         for (int i = 0; i < 4; ++i) order.addItem (300 + i, orderNames[i], true, i == curOrder);
         m.addSubMenu ("Region order", order);
+        juce::PopupMenu shape;
+        static const char* shapeNames[] = { "Even", "Fade out", "Swell", "Climb" };
+        const int curShape = juce::roundToInt (proc.state.getRawParameterValue (jd::trackId (track, "rshape"))->load());
+        for (int i = 0; i < 4; ++i) shape.addItem (500 + i, shapeNames[i], true, i == curShape);
+        m.addSubMenu ("Ratchet shape", shape);
         juce::PopupMenu cond;
         static const char* condNames[] = { "Every loop", "Every 2nd loop", "Every 3rd loop", "Every 4th loop", "First loop only" };
         const int curCond = juce::roundToInt (proc.state.getRawParameterValue (jd::trackId (track, "cond"))->load());
@@ -1052,6 +1057,7 @@ struct Liner : juce::Component, juce::FileDragAndDropTarget
             else if (r == 3) proc.humanizeLane (track, lane);
             else if (r == 4) proc.resetLane (track, lane);
             else if (r == 5) proc.clearPattern();
+            else if (r >= 500 && r < 504) setNorm (proc, jd::trackId (track, "rshape"), (float) (r - 500));
             else if (r >= 400 && r < 405) setNorm (proc, jd::trackId (track, "cond"), (float) (r - 400));
             else if (r >= 300 && r < 304) setNorm (proc, jd::trackId (track, "order"), (float) (r - 300));
             else if (r >= 100 && r < 100 + jd::kPatterns) proc.setEditPattern (r - 100);
