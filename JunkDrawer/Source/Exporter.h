@@ -144,6 +144,7 @@ struct ExportSnapshot
 inline std::unique_ptr<ExportSnapshot> takeSnapshot (JunkDrawerProcessor& p)
 {
     auto s = std::make_unique<ExportSnapshot>();
+    p.flushPatterns();
     s->settings = p.state.copyState();
     for (int t = 0; t < jd::kTracks; ++t) s->tracks[(size_t) t] = p.getTrack (t);
     s->bpm = juce::jlimit (40.0, 240.0, p.lastBpm());
@@ -188,7 +189,15 @@ public:
         double rate = getP (s, "m_rate", 1.f);
         if (getP (s, "m_ratemode", 0.f) > 0.5f) rate = jd::snapRate (rate);
         const double beats = jd::stepBeats (juce::roundToInt (getP (s, "seq_div", 2.f)), juce::roundToInt (getP (s, "seq_feel", 0.f)));
-        return (double) steps * beats / juce::jmax (0.05, rate) * 60.0 / s.bpm;
+        double seconds = (double) steps * beats / juce::jmax (0.05, rate) * 60.0 / s.bpm;
+        if (getP (s, "chain_on", 0.f) > 0.5f)                                   // with the chain on, one pass is one trip through the chain
+        {
+            int bars = 0;
+            auto ch = s.settings.getChildWithName ("chain");
+            for (int i = 0; i < ch.getNumChildren(); ++i) bars += juce::jmax (1, (int) ch.getChild (i).getProperty ("b", 1));
+            if (bars > 0) seconds = (double) bars * s.beatsPerBar * 60.0 / s.bpm;
+        }
+        return seconds;
     }
 
     static ExportResult run (const ExportSnapshot& s, const ExportOptions& opt, std::atomic<float>& progress, std::atomic<bool>& cancel)

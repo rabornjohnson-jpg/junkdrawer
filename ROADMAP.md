@@ -86,7 +86,7 @@ Step-lane engine, LFO engine, file loading, DAW recording pipeline. Pull these i
 - Region modes: sequential, random, pendulum, weighted random.
 - Region morphing (crossfade between two regions on one step).
 - Polymeter lane lengths.
-- Pattern chaining (8-16 patterns, changes on bar boundaries).
+- Pattern chaining: BUILT. Eight patterns (A-H), a 16-slot chain with 1/2/4/8-bar lengths, changes on the bar line, saved with the project, followed by Export. Song page plus the lane Edit menu.
 - Rummage (randomize with locked lanes) and Shake (mutate amount).
 - Copy/paste, humanize (volume, length, timing) and reset for lanes: BUILT (the Edit button beside the step lanes). Paste goes into the same kind of lane on any track.
 

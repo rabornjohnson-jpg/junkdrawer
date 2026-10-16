@@ -78,7 +78,7 @@ int main (int argc, char** argv)
 
     std::unique_ptr<juce::AudioProcessorEditor> ed (proc.createEditor());
     auto* editor = dynamic_cast<JunkDrawerEditor*> (ed.get());
-    const char* names[] = { "drawer", "lfos", "master", "matrix" };
+    const char* names[] = { "drawer", "lfos", "master", "matrix", "song" };
     int problems = 0;
 
     // empty drawer first, then one with a generated sample in track 1 (a few decaying hits)
@@ -128,6 +128,12 @@ int main (int argc, char** argv)
         proc.setArmedLfo (1);
         editor->showPage (0);
         for (int i = 0; i < 6; ++i) juce::MessageManager::getInstance()->runDispatchLoopUntil (40);
+    }
+    {
+        const int ch[][2] = { { 0, 2 }, { 1, 1 }, { 0, 1 }, { 2, 4 }, { 1, 2 } };
+        for (int i = 0; i < 5; ++i) proc.setChainSlot (i, ch[i][0], ch[i][1]);
+        auto* q = proc.state.getParameter ("chain_on");
+        q->setValueNotifyingHost (1.f);
     }
     for (int p = 0; p < JunkDrawerEditor::NumPages; ++p)
     {

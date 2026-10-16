@@ -316,6 +316,58 @@ int main()
         setP (sq, "seq_run", 0.f);
     }
 
+    // patterns and the chain
+    {
+        auto restart = [&] { setP (sq, "seq_run", 0.f); run (sq, 0.1, rate); setP (sq, "seq_run", 1.f); };
+        setP (sq, "seq_run", 0.f);
+        sq.setEditPattern (0); onlySteps ({ 0 });
+        sq.setEditPattern (1);
+        check (sq.editPattern() == 1 && juce::roundToInt (sq.state.getRawParameterValue (jd::stepId (0, 0, jd::LaneRegion))->load()) == 0, "a new pattern starts empty");
+        onlySteps ({ 2 });
+        sq.setEditPattern (0);
+        check (juce::roundToInt (sq.state.getRawParameterValue (jd::stepId (0, 0, jd::LaneRegion))->load()) == 1 && juce::roundToInt (sq.state.getRawParameterValue (jd::stepId (0, 2, jd::LaneRegion))->load()) == 0, "going back brings pattern A back as it was");
+        sq.setEditPattern (1);
+        check (juce::roundToInt (sq.state.getRawParameterValue (jd::stepId (0, 2, jd::LaneRegion))->load()) == 1, "and pattern B too");
+        sq.setEditPattern (0);
+
+        sq.setChainSlot (0, 0, 1); sq.setChainSlot (1, 1, 1);
+        check (sq.chainLength() == 2 && sq.chainPattern (1) == 1 && sq.chainBars (0) == 1, "the chain holds slots");
+        setP (sq, "chain_on", 1.f);
+        restart();
+        o = run (sq, 4.0, rate);                                              // two bars at 120 BPM
+        check (win (o, 100, 900) > 0.05f && win (o, 12100, 12900) < 1.0e-5f, "bar 1 plays pattern A (step 1 only)");
+        check (win (o, 96100, 96900) < 1.0e-5f && win (o, 108100, 108900) > 0.05f, "bar 2 plays pattern B from its own first step (step 3 only)");
+
+        setP (sq, "chain_on", 0.f);
+        restart();
+        o = run (sq, 0.4, rate);
+        check (win (o, 100, 900) > 0.05f && win (o, 12100, 12900) < 1.0e-5f, "with the chain off the pattern being edited plays");
+
+        sq.removeChainSlot (0);
+        check (sq.chainLength() == 1 && sq.chainPattern (0) == 1, "a slot can be removed");
+        sq.setChainSlot (0, 0, 2);
+        check (sq.chainBars (0) == 2, "and changed");
+
+        sq.copyPatternTo (3);
+        sq.setEditPattern (3);
+        check (juce::roundToInt (sq.state.getRawParameterValue (jd::stepId (0, 0, jd::LaneRegion))->load()) == 1, "a pattern copies to another slot");
+        sq.clearPattern();
+        check (juce::roundToInt (sq.state.getRawParameterValue (jd::stepId (0, 0, jd::LaneRegion))->load()) == 0, "and a pattern can be cleared");
+        sq.setEditPattern (1);
+
+        juce::MemoryBlock mb;
+        sq.getStateInformation (mb);
+        JunkDrawerProcessor back;
+        back.prepareToPlay (rate, 256);
+        back.setStateInformation (mb.getData(), (int) mb.getSize());
+        check (back.editPattern() == 1 && back.chainLength() == 1 && back.chainBars (0) == 2, "the edited pattern and the chain are saved with the project");
+        back.setEditPattern (0);
+        check (juce::roundToInt (back.state.getRawParameterValue (jd::stepId (0, 0, jd::LaneRegion))->load()) == 1, "and the other patterns come back too");
+        sq.setEditPattern (0);
+        sq.removeChainSlot (0);
+        setP (sq, "seq_run", 0.f);
+    }
+
     setP (sq, "seq_run", 0.f); run (sq, 0.1, rate); setP (sq, "seq_run", 1.f);
     onlySteps ({ 0, 1 });
     setP (sq, "m_swing", 0.75f);

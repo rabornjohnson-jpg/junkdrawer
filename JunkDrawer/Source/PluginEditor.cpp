@@ -137,8 +137,8 @@ struct JunkDrawerEditor::Header : juce::Component, juce::Timer, juce::ChangeList
     Header (JunkDrawerEditor& e) : ed (e)
     {
         ed.proc.addChangeListener (this);
-        const char* names[] = { "Drawer", "LFOs", "Master", "Matrix" };
-        const char* tips[]  = { "The main drawer", "The six LFOs", "Master and effects", "Everything that is hooked up" };
+        const char* names[] = { "Drawer", "LFOs", "Master", "Matrix", "Song" };
+        const char* tips[]  = { "The main drawer", "The six LFOs", "Master and effects", "Everything that is hooked up", "Patterns and the chain" };
         for (int i = 0; i < NumPages; ++i)
         {
             auto& b = tabs[(size_t) i];
@@ -170,7 +170,7 @@ struct JunkDrawerEditor::Header : juce::Component, juce::Timer, juce::ChangeList
     void resized() override
     {
         int x = 312;
-        for (auto& b : tabs) { b.setBounds (x, 12, 70, 28); x += 76; }
+        for (auto& b : tabs) { b.setBounds (x, 12, 62, 28); x += 66; }
         reduce.setBounds (getWidth() - 24 - 110, 12, 110, 28);
         exportBtn.setBounds (928, 12, 70, 28);
     }
@@ -933,7 +933,7 @@ struct Liner : juce::Component, juce::FileDragAndDropTarget
         record.setButtonText ("Record"); record.setTooltip ("Catch something: record from the plugin's audio input into this track");
         for (auto* b : { &browse, &clear, &record }) addAndMakeVisible (*b);
         laneBtn.setButtonText ("Edit");
-        laneBtn.setTooltip ("Copy this lane to paste on another track, nudge its values a little, or put it back to plain");
+        laneBtn.setTooltip ("The letter is the pattern you are editing. Copy this lane to paste on another track, nudge its values a little, or put it back to plain");
         laneBtn.onClick = [this] { openLaneMenu(); };
         addAndMakeVisible (laneBtn);
         keyBtn.setTooltip ("The project key. Match and Tune work towards it. Pick No key to tune to the nearest note only.");
@@ -1023,6 +1023,17 @@ struct Liner : juce::Component, juce::FileDragAndDropTarget
         m.addSeparator();
         m.addItem (3, "Humanize", Proc::canHumanize (lane));
         m.addItem (4, "Reset to plain");
+        m.addSeparator();
+        juce::PopupMenu edit, copyTo;
+        for (int i = 0; i < jd::kPatterns; ++i)
+        {
+            const juce::String letter = juce::String::charToString ((juce::juce_wchar) ('A' + i));
+            edit.addItem (100 + i, "Pattern " + letter, true, i == proc.editPattern());
+            copyTo.addItem (200 + i, "Pattern " + letter, i != proc.editPattern());
+        }
+        m.addSubMenu ("Edit pattern", edit);
+        m.addSubMenu ("Copy this pattern to", copyTo);
+        m.addItem (5, "Clear this pattern");
         m.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&laneBtn), [this, safe = juce::Component::SafePointer<Liner> (this), lane] (int r)
         {
             if (safe == nullptr || r == 0) return;
@@ -1030,6 +1041,11 @@ struct Liner : juce::Component, juce::FileDragAndDropTarget
             else if (r == 2) proc.pasteLane (track, clip);
             else if (r == 3) proc.humanizeLane (track, lane);
             else if (r == 4) proc.resetLane (track, lane);
+            else if (r == 5) proc.clearPattern();
+            else if (r >= 100 && r < 100 + jd::kPatterns) proc.setEditPattern (r - 100);
+            else if (r >= 200 && r < 200 + jd::kPatterns) proc.copyPatternTo (r - 200);
+            syncPatternLabel();
+            grid.repaint();
             repaint();
         });
     }
@@ -1075,8 +1091,15 @@ struct Liner : juce::Component, juce::FileDragAndDropTarget
     }
 
     // Called when a sample finished loading, was cleared, or the region count changed.
+    void syncPatternLabel()
+    {
+        const auto t = "Edit " + juce::String::charToString ((juce::juce_wchar) ('A' + proc.editPattern()));
+        if (laneBtn.getButtonText() != t) laneBtn.setButtonText (t);
+    }
+
     void refresh()
     {
+        syncPatternLabel();
         const bool loaded = proc.getTrack (track) != nullptr;
         if (proc.catchState() != Proc::CatchIdle && proc.catchTrack() == track) recOpen = true;     // a take started from elsewhere shows its panel
         if (selected >= regionCount()) pick (regionCount() - 1);
@@ -1859,6 +1882,136 @@ struct JunkDrawerEditor::MasterPage : juce::Component
 };
 
 //==============================================================================
+// Song page: eight patterns (A to H) and a chain that plays them one after another
+struct JunkDrawerEditor::SongPage : juce::Component, juce::ChangeListener, juce::Timer
+{
+    explicit SongPage (JunkDrawerEditor& e) : ed (e)
+    {
+        chain.setButtonText ("Chain");
+        chain.setClickingTogglesState (true);
+        chain.setTooltip ("On: the chain below plays pattern after pattern. Off: the pattern you are editing just loops.");
+        chainAtt = std::make_unique<juce::ButtonParameterAttachment> (*ed.proc.state.getParameter ("chain_on"), chain, nullptr);
+        addAndMakeVisible (chain);
+        ed.proc.addChangeListener (this);
+    }
+    ~SongPage() override { ed.proc.removeChangeListener (this); }
+
+    void changeListenerCallback (juce::ChangeBroadcaster*) override { repaint(); }
+    void visibilityChanged() override { if (isVisible()) startTimerHz (8); else stopTimer(); }
+    void timerCallback() override
+    {
+        const int pl = ed.proc.playingPattern(), ps = ed.proc.chainPosition();
+        if (pl != shownPlaying || ps != shownSlot) { shownPlaying = pl; shownSlot = ps; repaint(); }
+    }
+
+    void resized() override { chain.setBounds (1236 - 22 - 96, 37, 96, 30); }
+
+    static juce::Rectangle<int> patRect (int i) { return { 58 + i * 146, 172, 138, 120 }; }
+    static juce::Rectangle<int> slotRect (int i) { return { 58 + (i % 8) * 146, 396 + (i / 8) * 132, 138, 112 }; }
+    static juce::String letter (int i) { return juce::String::charToString ((juce::juce_wchar) ('A' + i)); }
+    juce::String barsText (int b) const { return juce::String (b) + (b == 1 ? " bar" : " bars"); }
+
+    void mouseUp (const juce::MouseEvent& e) override
+    {
+        if (e.mouseWasDraggedSinceMouseDown()) return;
+        for (int i = 0; i < jd::kPatterns; ++i)
+            if (patRect (i).contains (e.getPosition())) { ed.proc.setEditPattern (i); return; }
+        const int n = ed.proc.chainLength();
+        for (int i = 0; i <= n && i < jd::kChainMax; ++i)
+            if (slotRect (i).contains (e.getPosition())) { openSlotMenu (i); return; }
+    }
+
+    void openSlotMenu (int slot)
+    {
+        const bool adding = slot == ed.proc.chainLength();
+        const int curP = adding ? ed.proc.editPattern() : ed.proc.chainPattern (slot);
+        const int curB = adding ? 1 : ed.proc.chainBars (slot);
+        juce::PopupMenu m, pats, bars;
+        for (int i = 0; i < jd::kPatterns; ++i) pats.addItem (100 + i, "Pattern " + letter (i), true, ! adding && i == curP);
+        for (int b : { 1, 2, 4, 8 }) bars.addItem (200 + b, barsText (b), true, ! adding && b == curB);
+        m.addSubMenu (adding ? "Add pattern" : "Pattern", pats);
+        m.addSubMenu ("Length", bars, ! adding);
+        if (! adding) { m.addSeparator(); m.addItem (1, "Remove this slot"); }
+        m.showMenuAsync (juce::PopupMenu::Options(), [this, safe = juce::Component::SafePointer<SongPage> (this), slot, curP, curB] (int r)
+        {
+            if (safe == nullptr || r == 0) return;
+            if (r == 1) ed.proc.removeChainSlot (slot);
+            else if (r >= 100 && r < 100 + jd::kPatterns) ed.proc.setChainSlot (slot, r - 100, curB);
+            else if (r > 200) ed.proc.setChainSlot (slot, curP, r - 200);
+        });
+    }
+
+    void paint (juce::Graphics& g) override
+    {
+        paintDrawerFrame (g, false);
+        auto panel = [&] (juce::Rectangle<float> r)
+        {
+            g.setColour (pal::panel); g.fillRoundedRectangle (r, 4.f);
+            g.setColour (juce::Colour (0x29ffebbe)); g.drawRoundedRectangle (r.reduced (0.5f), 4.f, 1.f);
+        };
+        const juce::Rectangle<float> strip (44.f, 12.f, 1192.f, 80.f);
+        panel (strip);
+        drawStripLabel (g, "PATTERNS IN ORDER", 66, 24);
+        drawText (g, "Song", { 66, 40, 320, 32 }, serif (22.f), juce::Colour (0xfff6e8c9));
+        g.setColour (pal::line); g.fillRect (390, 24, 1, 56);
+        g.setColour (pal::textSoft);
+        g.setFont (sans (12.f));
+        g.drawFittedText ("Click a pattern to edit it. Build a chain below and turn Chain on; the pattern changes on the bar line.", { 410, 28, 560, 52 }, juce::Justification::centredLeft, 3, 1.f);
+
+        const int editing = ed.proc.editPattern(), playing = ed.proc.playingPattern(), slotNow = ed.proc.chainPosition();
+        panel ({ 44.f, 122.f, 1192.f, 190.f });
+        drawText (g, "PATTERNS", { 58, 134, 200, 24 }, mono (15.f, true), pal::text);
+        for (int i = 0; i < jd::kPatterns; ++i)
+        {
+            const auto r = patRect (i);
+            const bool ed_ = i == editing, pl = i == playing && ed.proc.state.getRawParameterValue ("seq_run")->load() > 0.5f;
+            g.setColour (ed_ ? pal::amber.withAlpha (0.18f) : juce::Colours::white.withAlpha (0.04f));
+            g.fillRoundedRectangle (r.toFloat(), 4.f);
+            g.setColour (ed_ ? pal::amber : pal::line);
+            g.drawRoundedRectangle (r.toFloat().reduced (0.5f), 4.f, ed_ ? 1.5f : 1.f);
+            drawText (g, letter (i), r.withTrimmedBottom (40).withTrimmedTop (10), serif (44.f), ed_ ? pal::amber : pal::text, juce::Justification::centred);
+            drawText (g, ed_ ? "Editing" : "Click to edit", r.withTop (r.getBottom() - 32).reduced (8, 0), sans (11.f, ed_), ed_ ? pal::amber : pal::textDim, juce::Justification::centred);
+            if (pl) { g.setColour (pal::amber); g.fillEllipse ((float) r.getRight() - 16.f, (float) r.getY() + 8.f, 8.f, 8.f); }
+        }
+
+        panel ({ 44.f, 330.f, 1192.f, 340.f });
+        drawText (g, "CHAIN", { 58, 342, 200, 24 }, mono (15.f, true), pal::text);
+        const int n = ed.proc.chainLength();
+        int total = 0;
+        for (int i = 0; i < n; ++i) total += ed.proc.chainBars (i);
+        drawText (g, n == 0 ? juce::String ("Empty") : juce::String (n) + (n == 1 ? " slot, " : " slots, ") + barsText (total), { 700, 342, 522, 24 }, mono (11.f), pal::amber, juce::Justification::centredRight);
+        for (int i = 0; i <= n && i < jd::kChainMax; ++i)
+        {
+            const auto r = slotRect (i);
+            if (i == n)
+            {
+                g.setColour (pal::line);
+                const float dash[] = { 4.f, 4.f };
+                juce::Path p; p.addRoundedRectangle (r.toFloat().reduced (0.5f), 4.f);
+                juce::PathStrokeType (1.f).createDashedStroke (p, p, dash, 2);
+                g.fillPath (p);
+                drawText (g, "+ Add", r, sans (13.f, true), pal::textDim, juce::Justification::centred);
+                continue;
+            }
+            const bool now = i == slotNow;
+            g.setColour (now ? pal::amber.withAlpha (0.22f) : juce::Colours::white.withAlpha (0.04f));
+            g.fillRoundedRectangle (r.toFloat(), 4.f);
+            g.setColour (now ? pal::amber : pal::line);
+            g.drawRoundedRectangle (r.toFloat().reduced (0.5f), 4.f, now ? 1.5f : 1.f);
+            drawText (g, juce::String (i + 1), { r.getX() + 10, r.getY() + 8, 40, 16 }, mono (11.f), pal::textDim);
+            drawText (g, letter (ed.proc.chainPattern (i)), r.withTrimmedTop (18).withTrimmedBottom (34), serif (38.f), now ? pal::amber : pal::text, juce::Justification::centred);
+            drawText (g, barsText (ed.proc.chainBars (i)), r.withTop (r.getBottom() - 32).reduced (8, 0), sans (11.f), pal::textSoft, juce::Justification::centred);
+        }
+        drawText (g, "Click a slot to change its pattern or length, or remove it. Export follows the chain when it is on.", { 58, 630, 1164, 24 }, sans (11.f), pal::textDim);
+    }
+
+    JunkDrawerEditor& ed;
+    juce::TextButton chain;
+    std::unique_ptr<juce::ButtonParameterAttachment> chainAtt;
+    int shownPlaying = -2, shownSlot = -2;
+};
+
+//==============================================================================
 // Matrix page (empty until the LFO engine and assignments exist)
 struct JunkDrawerEditor::MatrixPage : juce::Component, juce::ChangeListener
 {
@@ -2411,9 +2564,10 @@ JunkDrawerEditor::JunkDrawerEditor (JunkDrawerProcessor& p) : AudioProcessorEdit
     lfoPage = std::make_unique<LfoPage> (*this);
     masterPage = std::make_unique<MasterPage> (*this);
     matrixPage = std::make_unique<MatrixPage> (*this);
+    songPage = std::make_unique<SongPage> (*this);
     exportOverlay = std::make_unique<ExportPanel> (proc);
     addAndMakeVisible (*header);
-    for (juce::Component* c : { (juce::Component*) drawerPage.get(), (juce::Component*) lfoPage.get(), (juce::Component*) masterPage.get(), (juce::Component*) matrixPage.get() })
+    for (juce::Component* c : { (juce::Component*) drawerPage.get(), (juce::Component*) lfoPage.get(), (juce::Component*) masterPage.get(), (juce::Component*) matrixPage.get(), (juce::Component*) songPage.get() })
         addChildComponent (c);
     addChildComponent (*exportOverlay);
     showPage (Drawer);
@@ -2457,7 +2611,7 @@ void JunkDrawerEditor::buildModContext()
 void JunkDrawerEditor::showPage (int p)
 {
     page = juce::jlimit (0, (int) NumPages - 1, p);
-    juce::Component* pages[] = { drawerPage.get(), lfoPage.get(), masterPage.get(), matrixPage.get() };
+    juce::Component* pages[] = { drawerPage.get(), lfoPage.get(), masterPage.get(), matrixPage.get(), songPage.get() };
     for (int i = 0; i < NumPages; ++i) pages[i]->setVisible (i == page);
     header->select (page);
 }
@@ -2470,9 +2624,9 @@ void JunkDrawerEditor::paint (juce::Graphics& g)
 
 void JunkDrawerEditor::resized()
 {
-    if (header == nullptr || matrixPage == nullptr) return;                 // setSize() runs before the pages exist
+    if (header == nullptr || songPage == nullptr) return;                 // setSize() runs before the pages exist
     header->setBounds (0, 0, kW, 52);
-    for (juce::Component* c : { (juce::Component*) drawerPage.get(), (juce::Component*) lfoPage.get(), (juce::Component*) masterPage.get(), (juce::Component*) matrixPage.get() })
+    for (juce::Component* c : { (juce::Component*) drawerPage.get(), (juce::Component*) lfoPage.get(), (juce::Component*) masterPage.get(), (juce::Component*) matrixPage.get(), (juce::Component*) songPage.get() })
         c->setBounds (0, 52, kW, kH - 52);
     if (exportOverlay != nullptr) exportOverlay->setBounds (getLocalBounds());
 }

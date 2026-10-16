@@ -9,6 +9,18 @@ JunkDrawerProcessor::JunkDrawerProcessor()
 {
     jd::registerFormats (formats);
     reloadUserDrawers();
+    pChain = state.getRawParameterValue ("chain_on");
+    for (auto& b : bank)
+        for (int t = 0; t < jd::kTracks; ++t)
+        {
+            for (int ln = 0; ln < jd::kLanes; ++ln)
+            {
+                b[(size_t) patLenIndex (t, ln)].store ((float) jd::kSteps);
+                for (int s = 0; s < jd::kSteps; ++s) b[(size_t) patIndex (t, ln, s)].store (ln == jd::LaneVolume || ln == jd::LaneLength || ln == jd::LaneProb || ln == jd::LaneRatchet ? 1.f : 0.f);
+            }
+        }
+    for (auto& a : chainPat) a.store (0);
+    for (auto& a : chainBarsA) a.store (1);
     pVolume = state.getRawParameterValue ("m_volume");
     pPan    = state.getRawParameterValue ("m_pan");
     pDiv = state.getRawParameterValue ("seq_div");   pFeel = state.getRawParameterValue ("seq_feel");   pBpm = state.getRawParameterValue ("seq_bpm");  pRun = state.getRawParameterValue ("seq_run");
@@ -316,15 +328,32 @@ void JunkDrawerProcessor::processBlock (juce::AudioBuffer<float>& buf, juce::Mid
     };
 
     // A step can be pushed early or late by up to half its own length.  Tracks that use none of it take the cheap path.
+    // The chain plays one pattern per slot, changing on bar lines.  Without it the pattern being edited plays.
+    { const int e = editPat.load (std::memory_order_relaxed); if (e >= 0) lastLive = e; }
+    const int liveNow = lastLive;
+    const int slotsNow = chainLen.load();
+    const bool chaining = running && pChain->load() > 0.5f && slotsNow > 0;
+    int totalBars = 0;
+    if (chaining) for (int k = 0; k < slotsNow; ++k) totalBars += juce::jmax (1, chainBarsA[(size_t) k].load());
+    int pat = chaining && chainSlot >= 0 && chainSlot < slotsNow ? chainPat[(size_t) chainSlot].load() : liveNow;
+    long long relOff = chaining ? chainStart : 0;
+
     std::array<bool, jd::kTracks> shifted {};
-    for (int t = 0; t < jd::kTracks; ++t)
-        for (int s = 0; s < jd::kSteps; ++s)
-            if (std::abs (sp[(size_t) t][(size_t) s].v[jd::LaneTime]->load()) > 0.0005f) { shifted[(size_t) t] = true; break; }
+    auto scanShifted = [&]
+    {
+        for (int t = 0; t < jd::kTracks; ++t)
+        {
+            shifted[(size_t) t] = false;
+            for (int s = 0; s < jd::kSteps; ++s)
+                if (std::abs (patStep (pat, t, s, jd::LaneTime)) > 0.0005f) { shifted[(size_t) t] = true; break; }
+        }
+    };
+    scanShifted();
     const double swingC = juce::jlimit (0.5, 0.75, swing);
     auto timeAt = [&] (int t, long long step)
     {
-        const int len = juce::jlimit (1, jd::kSteps, juce::roundToInt (laneLen[(size_t) t][jd::LaneTime]->load()));
-        return (double) sp[(size_t) t][(size_t) (((step % len) + len) % len)].v[jd::LaneTime]->load();
+        const int len = patLen (pat, t, jd::LaneTime);
+        return (double) patStep (pat, t, (int) (((step % len) + len) % len), jd::LaneTime);
     };
     auto startOf = [&] (long long s) { return (double) ((s >> 1) * 2) + ((s & 1) != 0 ? 2.0 * swingC : 0.0); };
     auto lengthOf = [&] (long long s) { return (s & 1) != 0 ? 2.0 * (1.0 - swingC) : 2.0 * swingC; };
@@ -337,28 +366,56 @@ void JunkDrawerProcessor::processBlock (juce::AudioBuffer<float>& buf, juce::Mid
             long long S;
             double frac;
             jd::locateStep (u0 + dU * i, swing, S, frac);
-            if (i == 0 || S != seq[0].step) uiStep.store (S, std::memory_order_relaxed);
+
+            if (chaining)
+            {
+                const long long bar = (long long) std::floor ((ppq0 + dppq * i) / beatsPerBar);
+                if (bar != chainBar)
+                {
+                    chainBar = bar;
+                    int pos = (int) (((bar % totalBars) + totalBars) % totalBars), slot = 0;
+                    while (slot < slotsNow - 1 && pos >= juce::jmax (1, chainBarsA[(size_t) slot].load())) { pos -= juce::jmax (1, chainBarsA[(size_t) slot].load()); ++slot; }
+                    const bool slotStarts = pos == 0;
+                    if (slot != chainSlot || slotStarts)
+                    {
+                        chainSlot = slot;
+                        pat = chainPat[(size_t) slot].load();
+                        { long long Sb; double fb; jd::locateStep (u0 + dU * i + 1.0e-6, swing, Sb, fb); chainStart = relOff = Sb; }      // the new pattern starts from its first step (the epsilon absorbs float error on the bar line)
+                        for (auto& q : seq) q.step = -1;
+                        scanShifted();
+                        uiChain.store (slot, std::memory_order_relaxed);
+                        uiPattern.store (pat, std::memory_order_relaxed);
+                    }
+                }
+            }
+            else
+            {
+                chainBar = -1; chainSlot = -1;
+                if (pat != liveNow || relOff != 0) { pat = liveNow; relOff = 0; for (auto& q : seq) q.step = -1; scanShifted(); }
+            }
+            const long long Srel = juce::jmax (0LL, S - relOff);              // never a step before the pattern starts
+            if (i == 0 || Srel != seq[0].step) { uiStep.store (pat == editPat.load (std::memory_order_relaxed) ? Srel : -1, std::memory_order_relaxed); uiPattern.store (pat, std::memory_order_relaxed); if (! chaining) uiChain.store (-1, std::memory_order_relaxed); }
 
             std::array<uint8_t, jd::kTracks> action {};                    // 1 = trigger, 2 = release
             bool any = false;
             for (int t = 0; t < jd::kTracks; ++t)
             {
                 auto& q = seq[(size_t) t];
-                long long St = S;
+                long long St = Srel;
                 double ft = frac;
                 if (shifted[(size_t) t] && S >= 1)
                 {
                     const double uu = u0 + dU * i;
                     for (long long cnd = S + 1; cnd >= S - 1; --cnd)
                     {
-                        const double trig = startOf (cnd) + timeAt (t, cnd) * lengthOf (cnd);
-                        if (trig <= uu || cnd == S - 1) { St = cnd; ft = juce::jlimit (0.0, 0.999, (uu - trig) / lengthOf (cnd)); break; }
+                        const double trig = startOf (cnd) + timeAt (t, cnd - relOff) * lengthOf (cnd);
+                        if (trig <= uu || cnd == S - 1) { St = cnd - relOff; ft = juce::jlimit (0.0, 0.999, (uu - trig) / lengthOf (cnd)); break; }
                     }
                 }
                 if (St != q.step)
                 {
-                    applyStep (t, q, St);
-                    if (St % laneLength (t, jd::LaneRegion) == 0) restartFlag[(size_t) t] = true;      // a per-track LFO starts over with its track's loop
+                    applyStep (t, q, St, pat);
+                    if (St % patLen (pat, t, jd::LaneRegion) == 0) restartFlag[(size_t) t] = true;      // a per-track LFO starts over with its track's loop
                 }
                 if (q.region == 0) continue;
                 const int sub = juce::jmin (q.ratchet - 1, (int) (ft * q.ratchet));
@@ -396,6 +453,8 @@ void JunkDrawerProcessor::processBlock (juce::AudioBuffer<float>& buf, juce::Mid
         if (seqWasRunning)
             for (int t = 0; t < jd::kTracks; ++t) { if (seq[(size_t) t].fromSeq) voices[(size_t) t].release(); seq[(size_t) t].fromSeq = false; seq[(size_t) t].step = -1; }
         uiStep.store (-1, std::memory_order_relaxed);
+        chainBar = -1; chainSlot = -1; chainStart = 0;
+        uiChain.store (-1, std::memory_order_relaxed);
     }
     seqWasRunning = running;
 
@@ -461,13 +520,13 @@ void JunkDrawerProcessor::processBlock (juce::AudioBuffer<float>& buf, juce::Mid
 }
 
 // Reads one track's values for a running step number.  Each lane wraps on its own length, so lanes of different lengths drift against each other.
-void JunkDrawerProcessor::applyStep (int t, SeqTrack& q, long long step) const
+void JunkDrawerProcessor::applyStep (int t, SeqTrack& q, long long step, int pat) const
 {
     auto at = [&] (int lane)
     {
-        const int len = juce::jlimit (1, jd::kSteps, juce::roundToInt (laneLen[(size_t) t][(size_t) lane]->load()));
+        const int len = patLen (pat, t, lane);
         const int idx = (int) (((step % len) + len) % len);
-        return sp[(size_t) t][(size_t) idx].v[(size_t) lane]->load();
+        return patStep (pat, t, idx, lane);
     };
     q.step = step;
     const int count = juce::roundToInt (regCount[(size_t) t]->load());
@@ -825,6 +884,139 @@ void JunkDrawerProcessor::updateModulation (int n, double clockBeats, bool runni
 
 //==============================================================================
 //==============================================================================
+// Patterns
+void JunkDrawerProcessor::saveLiveToBank (int pat)
+{
+    auto& b = bank[(size_t) pat];
+    for (int t = 0; t < jd::kTracks; ++t)
+        for (int ln = 0; ln < jd::kLanes; ++ln)
+        {
+            b[(size_t) patLenIndex (t, ln)].store (laneLen[(size_t) t][(size_t) ln]->load());
+            for (int s = 0; s < jd::kSteps; ++s) b[(size_t) patIndex (t, ln, s)].store (sp[(size_t) t][(size_t) s].v[(size_t) ln]->load());
+        }
+}
+
+void JunkDrawerProcessor::loadBankToLive (int pat)
+{
+    const auto& b = bank[(size_t) pat];
+    for (int t = 0; t < jd::kTracks; ++t)
+        for (int ln = 0; ln < jd::kLanes; ++ln)
+        {
+            setParam (state, jd::laneLenId (t, ln), b[(size_t) patLenIndex (t, ln)].load());
+            for (int s = 0; s < jd::kSteps; ++s) setParam (state, jd::stepId (t, s, ln), b[(size_t) patIndex (t, ln, s)].load());
+        }
+}
+
+void JunkDrawerProcessor::setEditPattern (int p)
+{
+    p = juce::jlimit (0, jd::kPatterns - 1, p);
+    const int old = editPat.load();
+    if (p == old) return;
+    saveLiveToBank (old);
+    editPat.store (-1);                      // for a moment everything reads from the bank, so the audio never sees half-written steps
+    loadBankToLive (p);
+    editPat.store (p);
+    state.state.setProperty ("pat", p, nullptr);
+    sendChangeMessage();
+}
+
+void JunkDrawerProcessor::copyPatternTo (int dst)
+{
+    dst = juce::jlimit (0, jd::kPatterns - 1, dst);
+    if (dst == editPat.load()) return;
+    auto& d = bank[(size_t) dst];
+    for (int t = 0; t < jd::kTracks; ++t)
+        for (int ln = 0; ln < jd::kLanes; ++ln)
+        {
+            d[(size_t) patLenIndex (t, ln)].store (laneLen[(size_t) t][(size_t) ln]->load());
+            for (int s = 0; s < jd::kSteps; ++s) d[(size_t) patIndex (t, ln, s)].store (sp[(size_t) t][(size_t) s].v[(size_t) ln]->load());
+        }
+    sendChangeMessage();
+}
+
+void JunkDrawerProcessor::clearPattern()
+{
+    for (int t = 0; t < jd::kTracks; ++t)
+        for (int ln = 0; ln < jd::kLanes; ++ln)
+        {
+            setParam (state, jd::laneLenId (t, ln), (float) jd::kSteps);
+            resetLane (t, ln);
+        }
+    sendChangeMessage();
+}
+
+void JunkDrawerProcessor::setChainSlot (int i, int pattern, int bars)
+{
+    const int n = chainLen.load();
+    if (i < 0 || i > n || i >= jd::kChainMax) return;
+    chainPat[(size_t) i].store (juce::jlimit (0, jd::kPatterns - 1, pattern));
+    chainBarsA[(size_t) i].store (juce::jlimit (1, 16, bars));
+    if (i == n) chainLen.store (n + 1);
+    saveChainToState();
+    sendChangeMessage();
+}
+
+void JunkDrawerProcessor::removeChainSlot (int i)
+{
+    const int n = chainLen.load();
+    if (i < 0 || i >= n) return;
+    for (int k = i; k < n - 1; ++k) { chainPat[(size_t) k].store (chainPat[(size_t) k + 1].load()); chainBarsA[(size_t) k].store (chainBarsA[(size_t) k + 1].load()); }
+    chainLen.store (n - 1);
+    saveChainToState();
+    sendChangeMessage();
+}
+
+void JunkDrawerProcessor::saveChainToState()
+{
+    auto node = state.state.getOrCreateChildWithName ("chain", nullptr);
+    node.removeAllChildren (nullptr);
+    for (int i = 0; i < chainLen.load(); ++i)
+    {
+        juce::ValueTree e ("e");
+        e.setProperty ("p", chainPat[(size_t) i].load(), nullptr); e.setProperty ("b", chainBarsA[(size_t) i].load(), nullptr);
+        node.appendChild (e, nullptr);
+    }
+}
+
+void JunkDrawerProcessor::flushPatterns()
+{
+    if (editPat.load() >= 0) saveLiveToBank (editPat.load());
+    auto node = state.state.getOrCreateChildWithName ("patterns", nullptr);
+    node.removeAllChildren (nullptr);
+    for (int p = 0; p < jd::kPatterns; ++p)
+    {
+        juce::StringArray parts;
+        for (int i = 0; i < kPatN; ++i) parts.add (juce::String (bank[(size_t) p][(size_t) i].load(), 3));
+        juce::ValueTree e ("p");
+        e.setProperty ("d", parts.joinIntoString (" "), nullptr);
+        node.appendChild (e, nullptr);
+    }
+    state.state.setProperty ("pat", editPat.load(), nullptr);
+    saveChainToState();
+}
+
+void JunkDrawerProcessor::loadPatternsFromState()
+{
+    auto node = state.state.getChildWithName ("patterns");
+    for (int p = 0; p < node.getNumChildren() && p < jd::kPatterns; ++p)
+    {
+        const auto toks = juce::StringArray::fromTokens (node.getChild (p).getProperty ("d").toString(), " ", "");
+        if (toks.size() != kPatN) continue;
+        for (int i = 0; i < kPatN; ++i) bank[(size_t) p][(size_t) i].store (toks[i].getFloatValue());
+    }
+    editPat.store (juce::jlimit (0, jd::kPatterns - 1, (int) state.state.getProperty ("pat", 0)));
+    auto ch = state.state.getChildWithName ("chain");
+    const int n = juce::jmin (ch.getNumChildren(), jd::kChainMax);
+    for (int i = 0; i < n; ++i)
+    {
+        chainPat[(size_t) i].store (juce::jlimit (0, jd::kPatterns - 1, (int) ch.getChild (i).getProperty ("p")));
+        chainBarsA[(size_t) i].store (juce::jlimit (1, 16, (int) ch.getChild (i).getProperty ("b", 1)));
+    }
+    chainLen.store (n);
+    chainBar = -1; chainSlot = -1;
+}
+
+//==============================================================================
 // Lane tools
 static float laneDefault (int lane)
 {
@@ -1078,6 +1270,7 @@ juce::AudioProcessorEditor* JunkDrawerProcessor::createEditor() { return new Jun
 void JunkDrawerProcessor::getStateInformation (juce::MemoryBlock& dest)
 {
     saveSamplePaths();
+    flushPatterns();
     if (auto xml = state.copyState().createXml()) copyXmlToBinary (*xml, dest);
 }
 
@@ -1088,6 +1281,7 @@ void JunkDrawerProcessor::setStateInformation (const void* data, int size)
         {
             state.replaceState (juce::ValueTree::fromXml (*xml));
             loadMods();
+            loadPatternsFromState();
             drawerIndex = juce::jlimit (-1, drawerCount() - 1, (int) state.state.getProperty ("drawer", -1));
             listenWanted = (bool) state.state.getProperty ("listen", false);
             syncRing();

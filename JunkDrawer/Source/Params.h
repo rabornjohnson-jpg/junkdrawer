@@ -14,6 +14,7 @@ inline juce::String lfoId   (int lfo,   const char* suffix) { return "l" + juce:
 inline juce::String regionId (int track, int region, const char* suffix) { return "t" + juce::String (track + 1) + "_r" + juce::String (region + 1) + "_" + suffix; }
 // Sequencer lanes.  Every lane has its own length (1-16 steps) and its own 16 step values, so lanes can run against each other.
 enum Lane { LaneRegion, LaneVolume, LanePitch, LaneRatchet, LaneDirection, LaneLength, LaneProb, LaneTime, kLanes };
+constexpr int kPatterns = 8, kChainMax = 16;
 constexpr int kRolled = 6;                // Rummage and Shake re-roll the first six lanes; probability and timing are left as set
 constexpr int kSteps = 16;
 inline const char* laneKey (int lane)
@@ -156,6 +157,7 @@ inline juce::AudioProcessorValueTreeState::ParameterLayout createLayout()
     addChoice (l, "seq_div", "Step length", kStepDivs, 2);
     addChoice (l, "seq_feel", "Step feel", kStepFeels, 0);
     for (int ln = 0; ln < kRolled; ++ln) addBool (l, juce::String ("lock_") + laneKey (ln), juce::String ("Keep ") + laneKey (ln) + " lane", false);
+    addBool   (l, "chain_on", "Play the chain", false);
     addFloat  (l, "shake_amt", "Shake amount", { 0.f, 1.f, 0.01f }, 0.25f, pct());
     addFloat  (l, "seq_bpm", "Tempo without a host", { 40.f, 240.f, 0.1f }, 120.f, fmt (" BPM", 1));
     addBool   (l, "seq_run", "Run without a host", false);

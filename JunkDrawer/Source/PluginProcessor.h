@@ -67,6 +67,21 @@ public:
     float takeInputPeak() noexcept { return inPeak.exchange (0.f); }
     static juce::File recordingsFolder();
 
+    // Patterns: eight sets of step data (A to H).  The one being edited lives in the parameters; the others sit in a bank the audio thread can read.
+    // The chain plays patterns one after another, changing on bar lines.
+    int  editPattern() const noexcept { return editPat.load(); }
+    void setEditPattern (int p);
+    void copyPatternTo (int dst);
+    void clearPattern();
+    int  playingPattern() const noexcept { return uiPattern.load(std::memory_order_relaxed); }
+    int  chainPosition() const noexcept { return uiChain.load(std::memory_order_relaxed); }       // which chain slot is playing, -1 when the chain is not
+    int  chainLength() const noexcept { return chainLen.load(); }
+    int  chainPattern (int i) const noexcept { return chainPat[(size_t) i].load(); }
+    int  chainBars (int i) const noexcept { return chainBarsA[(size_t) i].load(); }
+    void setChainSlot (int i, int pattern, int bars);                // i == chainLength() adds a slot
+    void removeChainSlot (int i);
+    void flushPatterns();                                            // writes the bank and the chain into the saved state
+
     // Lane tools (message thread): copy and paste a lane's 16 steps and its length, nudge values by chance, or put a lane back to plain.
     struct LaneCopy { int lane = -1, length = 16; std::array<float, jd::kSteps> v {}; };
     LaneCopy copyLane (int track, int lane) const;
@@ -103,7 +118,7 @@ public:
     void reloadUserDrawers();
 
     // Offline export support: an export runs a second processor of its own (see Exporter.h).
-    void importSettings (const juce::ValueTree& tree) { state.replaceState (tree); loadMods(); }
+    void importSettings (const juce::ValueTree& tree) { state.replaceState (tree); loadMods(); loadPatternsFromState(); }
     void setTrackAudio (int track, std::shared_ptr<const jd::TrackData> d)
     {
         const juce::SpinLock::ScopedLockType sl (slotLock);
@@ -139,6 +154,7 @@ public:
 
     // The running step number while the sequencer plays (-1 when stopped).  The editor shows each lane's step as this modulo the lane's length.
     std::atomic<long long> uiStep { -1 };
+    std::atomic<int> uiPattern { 0 }, uiChain { -1 };
 
     // Output peak since the editor last looked (the editor reads and resets these about 30 times a second).
     std::atomic<float> peakL { 0.f }, peakR { 0.f };
@@ -243,7 +259,29 @@ private:
     bool wasOn[4] = { false, false, false, false };
     double internalPpq = 0.0;
     bool seqWasRunning = false;
-    void applyStep (int track, SeqTrack& q, long long step) const;
+    void applyStep (int track, SeqTrack& q, long long step, int pat) const;
+    // patterns
+    static constexpr int kPatN = jd::kTracks * jd::kLanes * jd::kSteps + jd::kTracks * jd::kLanes;
+    static int patIndex (int t, int lane, int s) noexcept { return (t * jd::kLanes + lane) * jd::kSteps + s; }
+    static int patLenIndex (int t, int lane) noexcept { return jd::kTracks * jd::kLanes * jd::kSteps + t * jd::kLanes + lane; }
+    std::array<std::array<std::atomic<float>, kPatN>, jd::kPatterns> bank;
+    std::atomic<int> editPat { 0 };
+    int lastLive = 0;
+    std::array<std::atomic<int>, jd::kChainMax> chainPat, chainBarsA;
+    std::atomic<int> chainLen { 0 };
+    std::atomic<float>* pChain = nullptr;
+    long long chainBar = -1, chainStart = 0;
+    int chainSlot = -1, chainTotalBarsCache = 0;
+    float patStep (int pat, int t, int s, int lane) const { return pat == editPat.load (std::memory_order_relaxed) ? sp[(size_t) t][(size_t) s].v[(size_t) lane]->load() : bank[(size_t) pat][(size_t) patIndex (t, lane, s)].load(); }
+    int patLen (int pat, int t, int lane) const
+    {
+        const float x = pat == editPat.load (std::memory_order_relaxed) ? laneLen[(size_t) t][(size_t) lane]->load() : bank[(size_t) pat][(size_t) patLenIndex (t, lane)].load();
+        return juce::jlimit (1, jd::kSteps, juce::roundToInt (x));
+    }
+    void saveLiveToBank (int pat);
+    void loadBankToLive (int pat);
+    void loadPatternsFromState();
+    void saveChainToState();
     void fillPatternIfEmpty (int track);
 public:
     // Rummage re-rolls every step of every lane that is not kept. Shake re-rolls only some of them (the Shake amount).
