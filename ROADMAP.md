@@ -90,13 +90,18 @@ Step-lane engine, LFO engine, file loading, DAW recording pipeline. Pull these i
 - Rummage (randomize with locked lanes) and Shake (mutate amount).
 - Copy/paste and humanize for lanes.
 
-### Stage 7b: Export (modeled on DriftLooper's Export window)
-- Export button at the top right of the header, opening an Export window (mockup: Export window board).
-- WHAT: master mix, or one file per track (stems). LENGTH by passes, time (up to 30 minutes) or bars. A pass is one run of the longest lane, so polymeter patterns still end on a clean cycle.
-- FILE TYPE WAV / AIFF / FLAC, BIT DEPTH 24 or 16 (dithered), SAMPLE RATE 96 / 48 / 44.1 kHz, ENDING cut / fade 2, 5, 10 s / ring out 3, 8 s (effect tails), NORMALIZE off / relative / maximum.
-- Offline render with the same engine as live playback, so LFOs, effects and Rummage results are all in the file. Memory stays flat with length. Size estimate and free-disk check before rendering. Each export makes its own dated sub-folder.
-- Options are Export-window settings remembered per computer, not automatable parameters (same exception as DriftLooper).
-- Tests: every file type, bit depth and rate reads back correctly; length and the 30 minute cap; fade reaches silence; ring-out keeps tails; stems sum to the master mix.
+### Stage 7b: Export (same selections and rules as DriftLooper, with this plug-in's look)
+- Export button at the top right of the header opens the Export window (mockup: Export window board).
+- WHAT: master stereo file, or one stem per track.
+- LENGTH three ways: PASSES (1-16 passes of the longest lane), TIME (minutes:seconds, up to 30 minutes) or BARS (follows tempo and time signature; the window shows the time it comes to). Cap 30 minutes of music per file.
+- FILE TYPE WAV / AIFF / FLAC. BIT DEPTH 24-bit or 16-bit (TPDF dither). SAMPLE RATE 96 / 48 / 44.1 kHz.
+- ENDING: cut at the end, fade out over 2 / 5 / 10 s (inside the length), or ring out for 3 / 8 s (the sequence stops and the Delay / Reverb tails render after the length).
+- NORMALIZE: Off / Relative / Maximum.
+- Defaults reproduce DriftLooper's: 4 passes, 96 kHz, 24-bit WAV, cut, master mix.
+- A long export is a real offline render with the same engine as live playback: LFOs, sequencer and effects keep moving the whole way (LFOs start from the beginning of their cycle, as on a fresh start). Memory does not grow with length (fixed-size blocks).
+- The window shows the estimated size of each file and of all files (FLAC is an estimate) and refuses to start when the drive does not have room.
+- Folder: the first export lets you choose a folder or have one assigned temporarily; every export makes its own dated sub-folder; CHANGE... reassigns it. Export settings and the folder are remembered per computer (settings.xml under Fading Fractal Audio), not automatable parameters. Result files can be dragged into a DAW.
+- Tests: all file type x bit depth x rate combinations read back correctly (format, length, level, size estimate); bars/time lengths and the 30 minute cap; fade reaches silence without clicks; ring-out keeps tails and ends in silence; 16-bit dither error about 0.7 of a 16-bit step; disk-space refusal; options saved and restored; stems sum to the master mix; LFOs keep moving across a long export.
 
 ### Stage 8: Polish
 - 100 factory presets ("drawers"), organized by feel.
