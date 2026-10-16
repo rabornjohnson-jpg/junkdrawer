@@ -331,6 +331,24 @@ int main()
         setP (sq, "seq_run", 0.f);
     }
 
+    // pan lane
+    {
+        auto restart = [&] { setP (sq, "seq_run", 0.f); run (sq, 0.1, rate); setP (sq, "seq_run", 1.f); };
+        onlySteps ({ 0 });
+        setP (sq, jd::stepId (0, 0, jd::LanePan), -1.f);
+        restart();
+        o = run (sq, 0.2, rate);
+        auto side = [&] (int ch) { juce::AudioBuffer<float> v (const_cast<float**> (o.getArrayOfReadPointers()) + ch, 1, 100, 800); return rms (v); };
+        check (side (0) > 0.02f && side (1) < side (0) * 0.2f, "a step panned hard left is heard on the left only");
+        setP (sq, jd::stepId (0, 0, jd::LanePan), 1.f);
+        restart();
+        o = run (sq, 0.2, rate);
+        check (side (1) > 0.02f && side (0) < side (1) * 0.2f, "a step panned hard right is heard on the right only");
+        setP (sq, jd::stepId (0, 0, jd::LanePan), 0.f);
+        onlySteps ({ 0, 2 });
+        setP (sq, "seq_run", 0.f);
+    }
+
     // ratchet shape
     {
         auto restart = [&] { setP (sq, "seq_run", 0.f); run (sq, 0.1, rate); setP (sq, "seq_run", 1.f); };

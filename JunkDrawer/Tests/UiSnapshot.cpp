@@ -164,8 +164,9 @@ int main (int argc, char** argv)
             auto set = [&] (int lane, float v) { auto* p = proc.state.getParameter (jd::stepId (0, k, lane)); p->setValueNotifyingHost (p->convertTo0to1 (v)); };
             set (jd::LaneProb, k % 4 == 0 ? 1.f : (k % 4 == 1 ? 0.75f : (k % 4 == 2 ? 0.5f : 0.25f)));
             set (jd::LaneTime, k % 3 == 0 ? 0.f : (k % 3 == 1 ? 0.25f : -0.2f));
+            set (jd::LanePan, k % 4 == 0 ? 0.f : (k % 4 == 1 ? -0.6f : (k % 4 == 2 ? 0.4f : 1.f)));
         }
-        for (const char* nm : { "Chance", "Timing" })
+        for (const char* nm : { "Chance", "Timing", "Pan" })
         {
             if (auto* b = findTab (*editor, nm)) b->triggerClick();
             for (int i = 0; i < 6; ++i) juce::MessageManager::getInstance()->runDispatchLoopUntil (40);

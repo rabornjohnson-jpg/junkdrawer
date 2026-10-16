@@ -251,7 +251,7 @@ private:
     {
         long long step = -1;
         int region = 0, ratchet = 1, sub = -1, dir = 0;
-        float vol = 1.f, pitch = 0.f, len = 1.f;
+        float vol = 1.f, pitch = 0.f, len = 1.f, pan = 0.f;
         bool released = true, noGate = false, fromSeq = false;
     };
     std::array<SeqTrack, jd::kTracks> seq;

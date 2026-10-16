@@ -613,7 +613,7 @@ struct StepGrid : juce::Component, juce::Timer, juce::SettableTooltipClient
 
     void paint (juce::Graphics& g) override
     {
-        static const char* names[] = { "Region", "Volume", "Pitch", "Ratchet", "Direction", "Length", "Chance", "Timing" };
+        static const char* names[] = { "Region", "Volume", "Pitch", "Ratchet", "Direction", "Length", "Chance", "Timing", "Pan" };
         drawText (g, names[lane], { 0, 0, labelW - 6, stripH }, sans (11.f, true), juce::Colour (0xff4a3320));
         drawText (g, "Volume", { 0, overviewY, labelW - 6, overviewH }, sans (11.f, true), juce::Colour (0xff4a3320));
 
@@ -679,6 +679,16 @@ struct StepGrid : juce::Component, juce::Timer, juce::SettableTooltipClient
             }
             case jd::LaneRatchet: fill (juce::roundToInt (v) / 4.f); top ("x" + juce::String (juce::roundToInt (v))); break;
             case jd::LaneProb: fill (v); top (juce::String (juce::roundToInt (v * 100.f))); break;
+            case jd::LanePan:
+            {
+                const float mid = bar.getCentreY(), y = mid - v * (bar.getHeight() * 0.5f);
+                g.setColour (pal::amber);
+                g.fillRect (bar.getX(), juce::jmin (mid, y), bar.getWidth(), juce::jmax (1.5f, std::abs (y - mid)));
+                g.setColour (juce::Colour (0x80f0e2c4)); g.fillRect (bar.getX(), mid, bar.getWidth(), 1.f);
+                const int pc = juce::roundToInt (v * 100.f);
+                top (pc == 0 ? juce::String ("C") : (pc < 0 ? "L" : "R") + juce::String (std::abs (pc)));
+                break;
+            }
             case jd::LaneTime:
             {
                 const float mid = bar.getCentreY(), y = mid - (v / 0.5f) * (bar.getHeight() * 0.5f);
@@ -736,6 +746,7 @@ struct StepGrid : juce::Component, juce::Timer, juce::SettableTooltipClient
             case jd::LanePitch:  setStep (i, (float) juce::roundToInt (-12.f + 24.f * yn)); break;
             case jd::LaneRatchet: setStep (i, (float) juce::jlimit (1, 4, 1 + (int) (yn * 4.f))); break;
             case jd::LaneProb:   setStep (i, std::round (yn * 20.f) / 20.f); break;
+            case jd::LanePan:    setStep (i, std::round ((yn - 0.5f) * 40.f) / 20.f); break;
             case jd::LaneTime:   setStep (i, std::round ((yn - 0.5f) * 20.f) / 20.f); break;
             default: break;
         }
@@ -962,10 +973,10 @@ struct Liner : juce::Component, juce::FileDragAndDropTarget
         addAndMakeVisible (grid);
         laneBtn.toFront (false);
 
-        static const char* laneNames[] = { "Region", "Volume", "Pitch", "Ratchet", "Direction", "Length", "Chance", "Timing" };
+        static const char* laneNames[] = { "Region", "Volume", "Pitch", "Ratchet", "Direction", "Length", "Chance", "Timing", "Pan" };
         static const char* laneTips[] = { "Which region plays on each step", "How loud each step is", "Shifts each step up or down in semitones", "Repeats a step 1 to 4 times",
                                           "Region keeps the region's own setting, or force forward or backward", "How long each step is held before it lets go",
-                                          "How likely each step is to play. Below 100 it sometimes skips, the same way every run.", "Pushes each step early or late, by up to half a step" };
+                                          "How likely each step is to play. Below 100 it sometimes skips, the same way every run.", "Pushes each step early or late, by up to half a step", "Places each step left or right of the track's own pan" };
         for (int i = 0; i < jd::kLanes; ++i)
         {
             auto& b = tabs[(size_t) i];
@@ -1123,7 +1134,7 @@ struct Liner : juce::Component, juce::FileDragAndDropTarget
         if (selected >= regionCount()) pick (regionCount() - 1);
         if (loaded && tag == nullptr) buildTag();
         if (! loaded) tag.reset();
-        for (auto* c : std::initializer_list<juce::Component*> { &wave, &grid, &clear, &less, &more, &tabs[0], &tabs[1], &tabs[2], &tabs[3], &tabs[4], &tabs[5], &tabs[6], &tabs[7], &keyBtn, &matchBtn, &matchAllBtn, &laneBtn, tuneKnob.get() })
+        for (auto* c : std::initializer_list<juce::Component*> { &wave, &grid, &clear, &less, &more, &tabs[0], &tabs[1], &tabs[2], &tabs[3], &tabs[4], &tabs[5], &tabs[6], &tabs[7], &tabs[8], &keyBtn, &matchBtn, &matchAllBtn, &laneBtn, tuneKnob.get() })
             if (c != nullptr) c->setVisible (loaded);
         keyBtn.setButtonText (keyButtonText());
         matchBtn.setEnabled (loaded && proc.trackKey (track).found);
@@ -1151,7 +1162,7 @@ struct Liner : juce::Component, juce::FileDragAndDropTarget
         wave.setBounds (16, 56, 656, 204);
         rec.setBounds (16, 56, 656, 204);
         int x = 16;
-        const int w[] = { 58, 58, 50, 58, 66, 58, 50, 58 };
+        const int w[] = { 52, 52, 44, 52, 58, 50, 50, 50, 36 };
         for (int i = 0; i < jd::kLanes; ++i) { tabs[(size_t) i].setBounds (x, 268, w[i], 24); x += w[i] + 5; }
         less.setBounds (552, 268, 24, 24);
         more.setBounds (610, 268, 24, 24);
@@ -1169,7 +1180,7 @@ struct Liner : juce::Component, juce::FileDragAndDropTarget
         g.setColour (juce::Colour (0x99281608));
         g.drawRect (r, 1.f);
 
-        padBehind (g, { &laneBtn, &keyBtn, &matchAllBtn, &matchBtn, &browse, &record, &clear, &tabs[0], &tabs[1], &tabs[2], &tabs[3], &tabs[4], &tabs[5], &tabs[6], &tabs[7], &less, &more });
+        padBehind (g, { &laneBtn, &keyBtn, &matchAllBtn, &matchBtn, &browse, &record, &clear, &tabs[0], &tabs[1], &tabs[2], &tabs[3], &tabs[4], &tabs[5], &tabs[6], &tabs[7], &tabs[8], &less, &more });
 
         auto td = proc.getTrack (track);
         if (td == nullptr && ! recOpen)

@@ -13,13 +13,13 @@ inline juce::String lfoId   (int lfo,   const char* suffix) { return "l" + juce:
 
 inline juce::String regionId (int track, int region, const char* suffix) { return "t" + juce::String (track + 1) + "_r" + juce::String (region + 1) + "_" + suffix; }
 // Sequencer lanes.  Every lane has its own length (1-16 steps) and its own 16 step values, so lanes can run against each other.
-enum Lane { LaneRegion, LaneVolume, LanePitch, LaneRatchet, LaneDirection, LaneLength, LaneProb, LaneTime, kLanes };
+enum Lane { LaneRegion, LaneVolume, LanePitch, LaneRatchet, LaneDirection, LaneLength, LaneProb, LaneTime, LanePan, kLanes };
 constexpr int kPatterns = 8, kChainMax = 16;
 constexpr int kRolled = 6;                // Rummage and Shake re-roll the first six lanes; probability and timing are left as set
 constexpr int kSteps = 16;
 inline const char* laneKey (int lane)
 {
-    static const char* k[] = { "region", "vol", "pitch", "ratchet", "dir", "len", "prob", "time" };
+    static const char* k[] = { "region", "vol", "pitch", "ratchet", "dir", "len", "prob", "time", "pan" };
     return k[lane];
 }
 inline juce::String stepId (int track, int step, int lane) { return "t" + juce::String (track + 1) + "_s" + juce::String (step + 1) + "_" + laneKey (lane); }
@@ -207,6 +207,7 @@ inline juce::AudioProcessorValueTreeState::ParameterLayout createLayout()
             addChoice (l, stepId (t, s, LaneDirection), sn + "direction", kDirections, 0);
             addFloat  (l, stepId (t, s, LaneLength),  sn + "length",  { 0.1f, 1.f, 0.001f }, 1.f, pct());
             addFloat  (l, stepId (t, s, LaneProb),    sn + "chance",  { 0.f, 1.f, 0.001f }, 1.f, pct());
+            addFloat  (l, stepId (t, s, LanePan),     sn + "pan",     { -1.f, 1.f, 0.01f }, 0.f, [] (float v, int) { const int p = juce::roundToInt (v * 100.f); return p == 0 ? juce::String ("C") : (p < 0 ? "L" : "R") + juce::String (std::abs (p)); });
             addFloat  (l, stepId (t, s, LaneTime),    sn + "timing",  { -0.5f, 0.5f, 0.001f }, 0.f, [] (float v, int) { const int p = juce::roundToInt (v * 100.f); return (p > 0 ? "+" : "") + juce::String (p) + "%"; });
         }
     }

@@ -453,7 +453,7 @@ void JunkDrawerProcessor::processBlock (juce::AudioBuffer<float>& buf, juce::Mid
                     else if (shape == 3) s.pitch += 2.f * (float) juce::jmax (0, q.sub);
                 }
                 const float g = juce::Decibels::decibelsToGain (v (tp[(size_t) t].level), -59.f) * q.vol * shapeGain;
-                voices[(size_t) t].trigger (std::move (d), s, g, v (tp[(size_t) t].pan));
+                voices[(size_t) t].trigger (std::move (d), s, g, juce::jlimit (-1.f, 1.f, v (tp[(size_t) t].pan) + q.pan));
                 q.fromSeq = true;
             }
         }
@@ -565,6 +565,7 @@ void JunkDrawerProcessor::applyStep (int t, SeqTrack& q, long long step, int pat
     q.ratchet = juce::jlimit (1, 4, juce::roundToInt (at (jd::LaneRatchet)));
     q.dir = juce::roundToInt (at (jd::LaneDirection));
     q.len = at (jd::LaneLength);
+    q.pan = at (jd::LanePan);
     const float chance = at (jd::LaneProb);
     if (q.region > 0 && chance < 0.999f && jd::hash01 ((juce::uint32) (step * 40503LL + (long long) t * 7919LL + 17LL)) >= chance) q.region = 0;      // the same dice every run, so a render matches what you heard
     q.sub = -1;
