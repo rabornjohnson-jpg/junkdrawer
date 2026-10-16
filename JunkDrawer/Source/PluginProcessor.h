@@ -67,6 +67,14 @@ public:
     float takeInputPeak() noexcept { return inPeak.exchange (0.f); }
     static juce::File recordingsFolder();
 
+    // Key and note: what a sound is in, and the buttons that bring it to the project key.
+    jd::KeyResult trackKey (int track) const { auto d = getTrack (track); return d != nullptr ? d->key : jd::KeyResult(); }
+    int projectRoot() const { return juce::roundToInt (state.getRawParameterValue ("key_root")->load()); }
+    int projectMode() const { return juce::roundToInt (state.getRawParameterValue ("key_mode")->load()); }
+    jd::PitchResult regionPitch (int track, int region) const;       // the note a region holds (message thread)
+    bool matchTrackToKey (int track);                                // sets the track's Tune so its key lands in the project key
+    bool tuneRegionToKey (int track, int region);                    // sets the region's Pitch so its note lands on the nearest note of the project key
+
     // Catch Last: while switched on, the last 30 seconds of input are kept so they can be saved into a track.
     static constexpr double kCatchLastSeconds = 30.0;
     void setListening (bool on);
@@ -203,7 +211,7 @@ private:
     std::atomic<float>* pVolume = nullptr;
     std::atomic<float>* pPan = nullptr;
 
-    struct TrackPtrs { std::atomic<float>* mute; std::atomic<float>* solo; std::atomic<float>* level; std::atomic<float>* pan; };
+    struct TrackPtrs { std::atomic<float>* mute; std::atomic<float>* solo; std::atomic<float>* level; std::atomic<float>* pan; std::atomic<float>* tune; };
     std::array<TrackPtrs, jd::kTracks> tp {};
     struct RegionPtrs { std::atomic<float> *start, *end, *pitch, *gain, *pan, *cutoff, *reso, *drive, *attack, *decay, *sustain, *release, *loop, *reverse; };
     std::array<std::array<RegionPtrs, jd::kRegions>, jd::kTracks> rp {};

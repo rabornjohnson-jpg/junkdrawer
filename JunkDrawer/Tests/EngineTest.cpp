@@ -707,6 +707,85 @@ int main()
         check (steps (jd::LaneVolume) != std::vector<float> (jd::kSteps, 0.3f), "an unkept lane gets re-rolled");
     }
 
+    std::printf ("Key and note\n");
+    {
+        const double sr = 44100.0;
+        auto tone = [&] (juce::AudioBuffer<float>& b, int from, int len, double hz, float amp)
+        {
+            for (int i = 0; i < len && from + i < b.getNumSamples(); ++i)
+            {
+                float v = 0.f;
+                for (int h = 1; h <= 4; ++h) v += (float) std::sin (2.0 * juce::MathConstants<double>::pi * hz * h * i / sr) * amp / (float) h;
+                const float env = std::min (1.f, (float) i / 400.f) * std::min (1.f, (float) (len - i) / 400.f);
+                for (int ch = 0; ch < 2; ++ch) b.addSample (ch, from + i, v * env);
+            }
+        };
+        auto hzOf = [] (double midi) { return 440.0 * std::pow (2.0, (midi - 69.0) / 12.0); };
+        auto chordSeq = [&] (std::vector<std::vector<int>> chords)
+        {
+            juce::AudioBuffer<float> b (2, (int) (sr * 8.0)); b.clear();
+            const int seg = b.getNumSamples() / (int) chords.size();
+            for (size_t c = 0; c < chords.size(); ++c)
+                for (int m : chords[c]) tone (b, (int) c * seg, seg, hzOf (m), 0.15f);
+            return b;
+        };
+
+        juce::AudioBuffer<float> one (2, (int) (sr * 1.0)); one.clear();
+        tone (one, 0, one.getNumSamples(), hzOf (57.14), 0.4f);
+        auto p = jd::detectPitch (one, sr, 0, one.getNumSamples());
+        check (p.found && std::abs (p.midi - 57.14f) < 0.1f, "a steady note is found to within a few cents");
+        check (jd::noteText (p.midi) == "A3 +14c", "and named with its cents");
+
+        juce::AudioBuffer<float> noise (2, (int) (sr * 1.0)); juce::Random rnd (5);
+        for (int ch = 0; ch < 2; ++ch) for (int i = 0; i < noise.getNumSamples(); ++i) noise.setSample (ch, i, rnd.nextFloat() * 0.6f - 0.3f);
+        check (! jd::detectPitch (noise, sr, 0, noise.getNumSamples()).found, "noise has no note");
+        check (! jd::detectKey (noise, sr).found, "noise has no key");
+        juce::AudioBuffer<float> tiny (2, 500); tiny.clear();
+        check (! jd::detectPitch (tiny, sr, 0, 500).found && ! jd::detectKey (tiny, sr).found, "a tiny or silent sound has neither");
+
+        auto gMajor = chordSeq ({ { 55, 59, 62 }, { 60, 64, 67 }, { 62, 66, 69 }, { 55, 59, 62 } });
+        auto k = jd::detectKey (gMajor, sr);
+        check (k.found && jd::matchShift (k, 7, 1) == 0, "G major chords are heard as G major or E minor");
+        auto aMinor = chordSeq ({ { 57, 60, 64 }, { 53, 57, 60 }, { 55, 59, 62 }, { 57, 60, 64 } });
+        k = jd::detectKey (aMinor, sr);
+        check (k.found && jd::matchShift (k, 9, 2) == 0, "A minor chords are heard as A minor or C major");
+        check (k.found && jd::keyText (k).isNotEmpty() && k.confidence >= 0.f && k.confidence <= 1.f, "a key reads as text with a confidence");
+
+        jd::KeyResult am; am.found = true; am.tonic = 9; am.minor = true;
+        check (jd::matchShift (am, 0, 2) == 3, "A minor to C minor is up 3");
+        check (jd::matchShift (am, 0, 1) == 0, "A minor and C major are the same key");
+        check (jd::matchShift (am, 5, 0) == -4, "with no mode only the tonic moves (A to F is down 4)");
+        check (jd::matchShift (jd::KeyResult(), 5, 1) == 0, "no key means no shift");
+        check (jd::nearestInKey (57.14f, 0, 1) == 57.f && jd::nearestInKey (61.2f, 0, 1) == 62.f, "the nearest note of C major");
+        check (jd::nearestInKey (61.2f, 0, 0) == 61.f, "with no key it is the nearest semitone");
+
+        // through the processor
+        auto td = std::make_shared<jd::TrackData>();
+        td->audio.makeCopyOf (gMajor); td->sampleRate = sr; td->name = "chords";
+        td->key = jd::detectKey (td->audio, sr);
+        proc.setTrackAudio (5, td);
+        setP (proc, "key_root", 0.f); setP (proc, "key_mode", 1.f);
+        check (proc.matchTrackToKey (5), "a track with a key can be matched");
+        const float tune = proc.state.getRawParameterValue ("t6_tune")->load();
+        check (std::abs (tune - (float) jd::matchShift (td->key, 0, 1)) < 0.01f && std::abs (tune) <= 6.f, "its Tune becomes the shift into C major");
+        proc.setTrackAudio (5, nullptr);
+
+        auto note = std::make_shared<jd::TrackData>();
+        note->audio.makeCopyOf (one); note->sampleRate = sr; note->name = "note";
+        proc.setTrackAudio (5, note);
+        setP (proc, "t6_tune", 0.f); setP (proc, "t6_regions", 1.f); setP (proc, "t6_r1_start", 0.f); setP (proc, "t6_r1_end", 1.f);
+        const auto rp = proc.regionPitch (5, 0);
+        check (rp.found && std::abs (rp.midi - 57.14f) < 0.1f, "a region reports its note");
+        check (proc.tuneRegionToKey (5, 0), "a region can be tuned");
+        check (std::abs (proc.state.getRawParameterValue ("t6_r1_pitch")->load() + 0.14f) < 0.1f, "A3 plus 14 cents is pulled down onto A3");
+        setP (proc, "t6_tune", 4.f);
+        proc.tuneRegionToKey (5, 0);
+        check (std::abs (proc.state.getRawParameterValue ("t6_r1_pitch")->load() - 0.86f) < 0.1f, "tuning takes the track's Tune into account (A3 + 4 lands on the nearest note of C major)");
+        setP (proc, "t6_tune", 0.f); setP (proc, "t6_r1_pitch", 0.f);
+        proc.setTrackAudio (5, nullptr);
+        check (! proc.tuneRegionToKey (5, 0) && ! proc.matchTrackToKey (5), "an empty track has nothing to tune");
+    }
+
     std::printf ("Catch Last\n");
     {
         const int T = 6;

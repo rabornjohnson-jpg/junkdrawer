@@ -147,6 +147,8 @@ inline juce::AudioProcessorValueTreeState::ParameterLayout createLayout()
     addFloat  (l, "fx_lim_mix",     "Mix",     { 0.f, 1.f, 0.001f }, 1.f, pct());
     addChoice (l, "fx_lim_look",    "Lookahead", { "Off", "1 ms", "5 ms" }, 1);
 
+    addChoice (l, "key_root", "Project key", { "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B" }, 0);
+    addChoice (l, "key_mode", "Project key mode", { "No key", "Major", "Minor" }, 0);
     addChoice (l, "snap", "Snap region edges", { "Off", "Hit", "Zero" }, 1);
 
     // ---- Sequencer (global) ---------------------------------------------------------------------------------------
@@ -165,6 +167,7 @@ inline juce::AudioProcessorValueTreeState::ParameterLayout createLayout()
         addBool  (l, trackId (t, "solo"),  n + "solo", false);
         addFloat (l, trackId (t, "level"), n + "level", { -60.f, 6.f, 0.01f }, 0.f, db());
         addFloat (l, trackId (t, "pan"),   n + "pan",   { -1.f, 1.f, 0.001f }, 0.f);
+        addFloat (l, trackId (t, "tune"),  n + "tune",  { -24.f, 24.f, 0.01f }, 0.f, semis());
         l.add (std::make_unique<juce::AudioParameterInt> (juce::ParameterID { trackId (t, "regions"), 1 }, n + "regions", 1, kRegions, 4));
 
         for (int r = 0; r < kRegions; ++r)

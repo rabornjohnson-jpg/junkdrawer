@@ -26,7 +26,8 @@ JunkDrawerProcessor::JunkDrawerProcessor()
             for (int ln = 0; ln < jd::kLanes; ++ln) sp[(size_t) t][(size_t) s].v[(size_t) ln] = state.getRawParameterValue (jd::stepId (t, s, ln));
         audition[(size_t) t] = 0; playing[(size_t) t] = 0; loadToken[(size_t) t] = 0;
         tp[(size_t) t] = { state.getRawParameterValue (jd::trackId (t, "mute")), state.getRawParameterValue (jd::trackId (t, "solo")),
-                           state.getRawParameterValue (jd::trackId (t, "level")), state.getRawParameterValue (jd::trackId (t, "pan")) };
+                           state.getRawParameterValue (jd::trackId (t, "level")), state.getRawParameterValue (jd::trackId (t, "pan")),
+                           state.getRawParameterValue (jd::trackId (t, "tune")) };
         for (int r = 0; r < jd::kRegions; ++r)
         {
             auto g = [&] (const char* s) { return state.getRawParameterValue (jd::regionId (t, r, s)); };
@@ -265,6 +266,7 @@ void JunkDrawerProcessor::processBlock (juce::AudioBuffer<float>& buf, juce::Mid
         jd::RegionSnapshot s;
         if (cmd == 100) { s.loop = jd::OneShot; }                            // the whole sample, plain
         else s = readRegion (t, juce::jlimit (0, jd::kRegions - 1, cmd - 1));
+        s.pitch += v (tp[(size_t) t].tune);                                  // a preview is heard in tune with the track
         const float g = juce::Decibels::decibelsToGain (v (tp[(size_t) t].level), -59.f);
         voices[(size_t) t].trigger (std::move (d), s, g, v (tp[(size_t) t].pan));
     }
@@ -356,7 +358,7 @@ void JunkDrawerProcessor::processBlock (juce::AudioBuffer<float>& buf, juce::Mid
                 }
                 if (d == nullptr) continue;
                 auto s = readRegion (t, q.region - 1);
-                s.pitch += q.pitch + masterPitch;
+                s.pitch += q.pitch + masterPitch + v (tp[(size_t) t].tune);
                 if (q.dir == 1) s.reverse = false; else if (q.dir == 2) s.reverse = true;
                 const float g = juce::Decibels::decibelsToGain (v (tp[(size_t) t].level), -59.f) * q.vol;
                 voices[(size_t) t].trigger (std::move (d), s, g, v (tp[(size_t) t].pan));
@@ -795,6 +797,38 @@ void JunkDrawerProcessor::updateModulation (int n, double clockBeats, bool runni
 }
 
 //==============================================================================
+//==============================================================================
+// Key and note
+jd::PitchResult JunkDrawerProcessor::regionPitch (int track, int region) const
+{
+    auto d = getTrack (track);
+    if (d == nullptr || region < 0 || region >= jd::kRegions) return {};
+    const float a = state.getRawParameterValue (jd::regionId (track, region, "start"))->load();
+    const float b = state.getRawParameterValue (jd::regionId (track, region, "end"))->load();
+    const int n = d->length();
+    return jd::detectPitch (d->audio, d->sampleRate, (int) (a * (float) n), (int) (b * (float) n));
+}
+
+bool JunkDrawerProcessor::matchTrackToKey (int track)
+{
+    const auto k = trackKey (track);
+    if (! k.found) return false;
+    setParam (state, jd::trackId (track, "tune"), (float) jd::matchShift (k, projectRoot(), projectMode()));
+    sendChangeMessage();
+    return true;
+}
+
+bool JunkDrawerProcessor::tuneRegionToKey (int track, int region)
+{
+    const auto p = regionPitch (track, region);
+    if (! p.found) return false;
+    const float tune = state.getRawParameterValue (jd::trackId (track, "tune"))->load();
+    const float target = jd::nearestInKey (p.midi + tune, projectRoot(), projectMode());
+    setParam (state, jd::regionId (track, region, "pitch"), std::round ((target - p.midi - tune) * 100.f) / 100.f);
+    sendChangeMessage();
+    return true;
+}
+
 //==============================================================================
 // Drawers
 void JunkDrawerProcessor::reloadUserDrawers() { userDrawers = jdp::loadUser(); }

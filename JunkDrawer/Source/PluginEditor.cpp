@@ -503,6 +503,10 @@ struct RegionTag : Panel
         rev.setTooltip ("Play this region backwards");
         addAndMakeVisible (rev);
         revAtt = std::make_unique<juce::ButtonParameterAttachment> (*s.getParameter (jd::regionId (track, region, "reverse")), rev, nullptr);
+        tuneBtn.setButtonText ("Tune");
+        tuneBtn.setTooltip ("Pull this region onto the nearest note of the project key, so it sounds in tune with the rest. It sets the Pitch knob.");
+        tuneBtn.onClick = [this] { proc.tuneRegionToKey (tr, reg); repaint(); };
+        addAndMakeVisible (tuneBtn);
         wStart = std::make_unique<Watch> (s, jd::regionId (track, region, "start"), *this);
         wEnd   = std::make_unique<Watch> (s, jd::regionId (track, region, "end"), *this);
     }
@@ -512,6 +516,7 @@ struct RegionTag : Panel
         for (int k = 0; k < 6; ++k) main[(size_t) k]->setBounds (6 + (k % 3) * 68, 34 + (k / 3) * 80, 68, 76);
         loop->setBounds (12, 198, getWidth() - 24, 24);
         rev.setBounds (12, 228, 90, 24);
+        tuneBtn.setBounds (getWidth() - 12 - 70, 273, 70, 22);
         for (int k = 0; k < 4; ++k) env[(size_t) k]->setBounds (10 + k * 49, 318, 49, 64);
     }
 
@@ -522,8 +527,11 @@ struct RegionTag : Panel
         auto td = proc.getTrack (tr);
         const double dur = td != nullptr ? td->seconds() : 0.0;
         const float a = plainValue (proc, jd::regionId (tr, reg, "start")), b = plainValue (proc, jd::regionId (tr, reg, "end"));
-        drawText (g, "Start " + seconds (a * dur), { 12, 258, getWidth() - 24, 16 }, mono (11.f), pal::amber);
-        drawText (g, "End " + seconds (b * dur), { 12, 274, getWidth() - 24, 16 }, mono (11.f), pal::amber);
+        drawText (g, "Start " + seconds (a * dur), { 12, 258, 100, 16 }, mono (11.f), pal::amber);
+        drawText (g, "End " + seconds (b * dur), { 12, 274, 100, 16 }, mono (11.f), pal::amber);
+        if (td != nullptr && (a != seenA || b != seenB || td.get() != seenData)) { seenA = a; seenB = b; seenData = td.get(); pitch = proc.regionPitch (tr, reg); }
+        drawText (g, pitch.found ? jd::noteText (pitch.midi) : juce::String ("no note"), { getWidth() - 12 - 90, 256, 90, 16 }, mono (11.f, true), pitch.found ? pal::text : pal::textDim, juce::Justification::centredRight);
+        tuneBtn.setEnabled (pitch.found);
         drawStripLabel (g, "ENVELOPE", 12, 298);
     }
 
@@ -535,6 +543,10 @@ struct RegionTag : Panel
     juce::TextButton rev;
     std::unique_ptr<juce::ButtonParameterAttachment> revAtt;
     std::unique_ptr<Watch> wStart, wEnd;
+    juce::TextButton tuneBtn;
+    jd::PitchResult pitch;
+    float seenA = -1.f, seenB = -1.f;
+    const jd::TrackData* seenData = nullptr;
 };
 
 // Dark pad set into the paper behind a control, because the controls are cream on dark.
@@ -907,6 +919,14 @@ struct Liner : juce::Component, juce::FileDragAndDropTarget
         clear.setButtonText ("Clear");    clear.setTooltip ("Take the sound out of this track");
         record.setButtonText ("Record"); record.setTooltip ("Catch something: record from the plugin's audio input into this track");
         for (auto* b : { &browse, &clear, &record }) addAndMakeVisible (*b);
+        keyBtn.setTooltip ("The project key. Match and Tune work towards it. Pick No key to tune to the nearest note only.");
+        matchBtn.setButtonText ("Match");
+        matchBtn.setTooltip ("Shift this whole track into the project key. It sets the track's Tune from the key found in the sound.");
+        keyBtn.onClick = [this] { openKeyMenu(); };
+        matchBtn.onClick = [this] { proc.matchTrackToKey (track); repaint(); };
+        addAndMakeVisible (keyBtn); addAndMakeVisible (matchBtn);
+        wRoot = std::make_unique<Watch> (p.state, "key_root", *this);
+        wMode = std::make_unique<Watch> (p.state, "key_mode", *this);
         addChildComponent (rec);
         record.onClick = [this] { if (proc.catchState() == Proc::CatchIdle) { recOpen = ! recOpen; rec.setTrack (track); refresh(); } };
         rec.onClose = [this] { recOpen = false; refresh(); };
@@ -947,9 +967,38 @@ struct Liner : juce::Component, juce::FileDragAndDropTarget
         repaint (460, 262, 212, 34);
     }
 
+    void openKeyMenu()
+    {
+        juce::PopupMenu m;
+        const int root = proc.projectRoot(), mode = proc.projectMode();
+        m.addItem (1, "No key (nearest note)", true, mode == 0);
+        m.addSeparator();
+        for (int i = 0; i < 12; ++i) m.addItem (2 + i, juce::String (jd::noteName (i)) + " major", true, mode == 1 && root == i);
+        m.addSeparator();
+        for (int i = 0; i < 12; ++i) m.addItem (14 + i, juce::String (jd::noteName (i)) + " minor", true, mode == 2 && root == i);
+        m.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&keyBtn), [this, safe = juce::Component::SafePointer<Liner> (this)] (int r)
+        {
+            if (safe == nullptr || r == 0) return;
+            if (r == 1) setNorm (proc, "key_mode", 0.f);
+            else { setNorm (proc, "key_mode", r < 14 ? 1.f : 2.f); setNorm (proc, "key_root", (float) ((r - 2) % 12)); }
+            refresh();
+        });
+    }
+
+    juce::String keyButtonText() const
+    {
+        const int mode = proc.projectMode();
+        return mode == 0 ? juce::String ("Key: none") : "Key: " + juce::String (jd::noteName (proc.projectRoot())) + (mode == 2 ? " minor" : " major");
+    }
+
     void setTrack (int t)
     {
         track = t;
+        wTune = std::make_unique<Watch> (proc.state, jd::trackId (t, "tune"), *this);
+        tuneKnob = std::make_unique<Knob> (proc.state, jd::trackId (t, "tune"), "Tune", 22);
+        tuneKnob->showText = false;
+        tuneKnob->slider.setTooltip ("Tune this whole track up or down in semitones. Match sets it for you.");
+        addAndMakeVisible (*tuneKnob);
         recOpen = proc.catchState() != Proc::CatchIdle && proc.catchTrack() == t;
         rec.setTrack (t);
         selected = juce::jlimit (0, juce::jmax (0, regionCount() - 1), regions[(size_t) t]);
@@ -984,8 +1033,10 @@ struct Liner : juce::Component, juce::FileDragAndDropTarget
         if (selected >= regionCount()) pick (regionCount() - 1);
         if (loaded && tag == nullptr) buildTag();
         if (! loaded) tag.reset();
-        for (auto* c : std::initializer_list<juce::Component*> { &wave, &grid, &clear, &less, &more, &tabs[0], &tabs[1], &tabs[2], &tabs[3], &tabs[4], &tabs[5] })
-            c->setVisible (loaded);
+        for (auto* c : std::initializer_list<juce::Component*> { &wave, &grid, &clear, &less, &more, &tabs[0], &tabs[1], &tabs[2], &tabs[3], &tabs[4], &tabs[5], &keyBtn, &matchBtn, tuneKnob.get() })
+            if (c != nullptr) c->setVisible (loaded);
+        keyBtn.setButtonText (keyButtonText());
+        matchBtn.setEnabled (loaded && proc.trackKey (track).found);
         wave.setVisible (loaded && ! recOpen);
         rec.setVisible (recOpen);
         record.setToggleState (recOpen, juce::dontSendNotification);
@@ -1000,9 +1051,12 @@ struct Liner : juce::Component, juce::FileDragAndDropTarget
     void resized() override
     {
         const bool loaded = proc.getTrack (track) != nullptr;
-        clear.setBounds (16 + 656 - 70, 12, 70, 28);
-        browse.setBounds (loaded ? 16 + 656 - 70 - 8 - 80 : getWidth() / 2 - 128, loaded ? 12 : 268, loaded ? 80 : 120, 28);
-        record.setBounds (loaded ? 16 + 656 - 70 - 8 - 80 - 8 - 80 : getWidth() / 2 + 8, loaded ? 12 : 268, loaded ? 80 : 120, 28);
+        clear.setBounds (16 + 656 - 56, 12, 56, 28);
+        browse.setBounds (loaded ? 16 + 656 - 56 - 8 - 64 : getWidth() / 2 - 128, loaded ? 12 : 268, loaded ? 64 : 120, 28);
+        record.setBounds (loaded ? 16 + 656 - 56 - 8 - 64 - 8 - 64 : getWidth() / 2 + 8, loaded ? 12 : 268, loaded ? 64 : 120, 28);
+        keyBtn.setBounds (292, 6, 172, 24);
+        matchBtn.setBounds (292, 32, 58, 22);
+        if (tuneKnob != nullptr) tuneKnob->setBounds (356, 30, 30, 26);
         wave.setBounds (16, 56, 656, 204);
         rec.setBounds (16, 56, 656, 204);
         int x = 16;
@@ -1023,7 +1077,7 @@ struct Liner : juce::Component, juce::FileDragAndDropTarget
         g.setColour (juce::Colour (0x99281608));
         g.drawRect (r, 1.f);
 
-        padBehind (g, { &browse, &record, &clear, &tabs[0], &tabs[1], &tabs[2], &tabs[3], &tabs[4], &tabs[5], &less, &more });
+        padBehind (g, { &keyBtn, &matchBtn, &browse, &record, &clear, &tabs[0], &tabs[1], &tabs[2], &tabs[3], &tabs[4], &tabs[5], &less, &more });
 
         auto td = proc.getTrack (track);
         if (td == nullptr && ! recOpen)
@@ -1034,9 +1088,15 @@ struct Liner : juce::Component, juce::FileDragAndDropTarget
         }
         else if (td != nullptr)
         {
-            drawText (g, td->name, { 16, 10, 656 - 70 - 8 - 80 - 8 - 80 - 12, 22 }, serif (18.f, false), ink);
-            drawText (g, seconds (td->seconds()) + "  " + juce::String::charToString (0x00b7) + "  " + juce::String (regionCount()) + (regionCount() == 1 ? " region" : " regions"),
-                      { 16, 32, 656 - 70 - 8 - 80 - 8 - 80 - 12, 16 }, sans (11.f), ink.withAlpha (0.75f));
+            const auto dot = juce::String::charToString (0x00b7);
+            drawText (g, td->name, { 16, 10, 268, 22 }, serif (18.f, false), ink);
+            const auto k = td->key;
+            const auto keyPart = k.found ? jd::keyText (k) + (k.confidence >= 0.5f ? ", likely" : ", maybe") : juce::String ("no clear key");
+            drawText (g, seconds (td->seconds()) + "  " + dot + "  " + juce::String (regionCount()) + (regionCount() == 1 ? " region" : " regions") + "  " + dot + "  " + keyPart,
+                      { 16, 32, 272, 16 }, sans (11.f), ink.withAlpha (0.75f));
+            const float tune = plainValue (proc, jd::trackId (track, "tune"));
+            drawText (g, "Tune", { 392, 31, 72, 12 }, sans (11.f, true), ink.withAlpha (0.85f));
+            drawText (g, (tune > 0.05f ? "+" : "") + juce::String (tune, 1) + " st", { 392, 42, 72, 12 }, mono (11.f), ink);
             drawText (g, "Steps", { 462, 268, 62, 24 }, sans (11.f, true), ink.withAlpha (0.85f), juce::Justification::centredRight);
             drawText (g, juce::String (proc.laneLength (track, grid.laneIndex())), { 554, 268, 36, 24 }, mono (13.f, true), ink, juce::Justification::centred);
             const int feel = juce::jlimit (0, 2, juce::roundToInt (plainValue (proc, "seq_feel")));
@@ -1071,7 +1131,9 @@ struct Liner : juce::Component, juce::FileDragAndDropTarget
     StepGrid grid;
     std::unique_ptr<RegionTag> tag;
     std::array<juce::TextButton, jd::kLanes> tabs;
-    juce::TextButton browse, clear, record, less, more;
+    juce::TextButton browse, clear, record, less, more, keyBtn, matchBtn;
+    std::unique_ptr<Knob> tuneKnob;
+    std::unique_ptr<Watch> wTune, wRoot, wMode;
     RecPanel rec;
     bool recOpen = false;
     juce::String message;

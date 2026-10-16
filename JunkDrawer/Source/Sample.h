@@ -1,5 +1,6 @@
 #pragma once
 #include <juce_audio_formats/juce_audio_formats.h>
+#include "Analysis.h"
 
 // Sample data and the helpers that work on it (loading, hit detection, snapping).  Nothing here touches the audio thread.
 namespace jd
@@ -13,6 +14,7 @@ struct TrackData
     double sampleRate = 44100.0;
     juce::String path, name;
     bool truncated = false;                   // the file was longer than kMaxSeconds
+    KeyResult key;                            // worked out once, when the sound loads
 
     int length() const noexcept { return audio.getNumSamples(); }
     double seconds() const noexcept { return sampleRate > 0.0 ? length() / sampleRate : 0.0; }
@@ -44,7 +46,7 @@ inline std::shared_ptr<TrackData> loadTrackData (const juce::File& file, double 
     reader->read (&src, 0, (int) srcLen, 0, true, true);
     if (reader->numChannels == 1) src.copyFrom (1, 0, src, 0, 0, (int) srcLen);    // mono files play in both ears
 
-    if (std::abs (ratio - 1.0) < 1.0e-9) { td->audio = std::move (src); return td; }
+    if (std::abs (ratio - 1.0) < 1.0e-9) { td->audio = std::move (src); td->key = detectKey (td->audio, td->sampleRate); return td; }
 
     const int outLen = (int) std::floor ((double) srcLen / ratio);
     td->audio.setSize (2, juce::jmax (1, outLen));
@@ -53,6 +55,7 @@ inline std::shared_ptr<TrackData> loadTrackData (const juce::File& file, double 
         juce::LagrangeInterpolator li;
         li.process (ratio, src.getReadPointer (ch), td->audio.getWritePointer (ch), td->audio.getNumSamples());
     }
+    td->key = detectKey (td->audio, td->sampleRate);
     return td;
 }
 
@@ -60,7 +63,7 @@ inline std::shared_ptr<TrackData> loadTrackData (const juce::File& file, double 
 inline std::shared_ptr<TrackData> resampledCopy (const TrackData& src, double targetRate)
 {
     auto td = std::make_shared<TrackData>();
-    td->path = src.path; td->name = src.name; td->truncated = src.truncated;
+    td->path = src.path; td->name = src.name; td->truncated = src.truncated; td->key = src.key;
     td->sampleRate = targetRate;
     if (std::abs (src.sampleRate - targetRate) < 0.5) { td->audio = src.audio; td->sampleRate = src.sampleRate; return td; }
     const double ratio = src.sampleRate / targetRate;

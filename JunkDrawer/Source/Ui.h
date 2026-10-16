@@ -186,6 +186,7 @@ public:
             }
         }
 
+        if (! showText) return;
         auto r = getLocalBounds().withTrimmedTop (size + 6);
         drawText (g, name, r.removeFromTop (14), sans (12.f, true), nameCol, juce::Justification::centred);
         juce::String valueText = param.getCurrentValueAsText();
@@ -213,6 +214,7 @@ public:
     void mouseDoubleClick (const juce::MouseEvent&) override { if (assigning()) ctx->remove (paramId, ctx->armed()); }
 
     juce::Slider slider;
+    bool showText = true;                                   // false: only the dial (the caller writes its own label)
 
 private:
     bool assigning() const { return ctx != nullptr && ctx->armed() >= 0; }

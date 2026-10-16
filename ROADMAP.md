@@ -90,7 +90,13 @@ Step-lane engine, LFO engine, file loading, DAW recording pipeline. Pull these i
 - Rummage (randomize with locked lanes) and Shake (mutate amount).
 - Copy/paste and humanize for lanes.
 
-### Stage 7b: Export (BUILT: window, first-time folder prompt, offline render; same selections and rules as DriftLooper, with this plug-in's look)
+### Key and note matching (BUILT)
+- Key found once when a sound loads (pitch-class profile against major and minor; relative keys count as the same). Note found per region on demand (YIN, loudest slices must agree). Both answer "no clear key/note" instead of guessing.
+- Project key (Key: none / major / minor) picked from the file strip. Match sets the track's Tune (new per-track parameter, LFO-assignable) to land in the key; Tune on the region tag sets the region Pitch to the nearest note of the key (or nearest semitone with no key). Previews use the track Tune.
+- Drawers do not store Tune or the project key (they belong to the sounds).
+- Not done: scale beyond major/minor, per-step key follow, chord detection.
+
+## Stage 7b: Export (BUILT: window, first-time folder prompt, offline render; same selections and rules as DriftLooper, with this plug-in's look)
 - Export button at the top right of the header opens the Export window (mockup: Export window board).
 - WHAT: master stereo file, or one stem per track.
 - LENGTH three ways: PASSES (1-16 passes of the longest lane), TIME (minutes:seconds, up to 30 minutes) or BARS (follows tempo and time signature; the window shows the time it comes to). Cap 30 minutes of music per file.
