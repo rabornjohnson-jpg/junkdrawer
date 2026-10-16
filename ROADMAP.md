@@ -90,6 +90,14 @@ Step-lane engine, LFO engine, file loading, DAW recording pipeline. Pull these i
 - Rummage (randomize with locked lanes) and Shake (mutate amount).
 - Copy/paste and humanize for lanes.
 
+### Stage 7b: Export (modeled on DriftLooper's Export window)
+- Export button at the top right of the header, opening an Export window (mockup: Export window board).
+- WHAT: master mix, or one file per track (stems). LENGTH by passes, time (up to 30 minutes) or bars. A pass is one run of the longest lane, so polymeter patterns still end on a clean cycle.
+- FILE TYPE WAV / AIFF / FLAC, BIT DEPTH 24 or 16 (dithered), SAMPLE RATE 96 / 48 / 44.1 kHz, ENDING cut / fade 2, 5, 10 s / ring out 3, 8 s (effect tails), NORMALIZE off / relative / maximum.
+- Offline render with the same engine as live playback, so LFOs, effects and Rummage results are all in the file. Memory stays flat with length. Size estimate and free-disk check before rendering. Each export makes its own dated sub-folder.
+- Options are Export-window settings remembered per computer, not automatable parameters (same exception as DriftLooper).
+- Tests: every file type, bit depth and rate reads back correctly; length and the 30 minute cap; fade reaches silence; ring-out keeps tails; stems sum to the master mix.
+
 ### Stage 8: Polish
 - 100 factory presets ("drawers"), organized by feel.
 - Installer, About page, quick-start guide.
