@@ -316,6 +316,21 @@ int main()
         setP (sq, "seq_run", 0.f);
     }
 
+    // region order
+    {
+        auto restart = [&] { setP (sq, "seq_run", 0.f); run (sq, 0.1, rate); setP (sq, "seq_run", 1.f); };
+        onlySteps ({ 0, 2 });
+        for (int mode = 0; mode < 4; ++mode)
+        {
+            setP (sq, jd::trackId (0, "order"), (float) mode);
+            restart();
+            o = run (sq, 0.4, rate);
+            check (win (o, 100, 900) > 0.05f && win (o, 6100, 6900) < 1.0e-5f && win (o, 12100, 12900) > 0.05f, "region order " + juce::String (mode) + " keeps the written steps on the grid");
+        }
+        setP (sq, jd::trackId (0, "order"), 0.f);
+        setP (sq, "seq_run", 0.f);
+    }
+
     // patterns and the chain
     {
         auto restart = [&] { setP (sq, "seq_run", 0.f); run (sq, 0.1, rate); setP (sq, "seq_run", 1.f); };

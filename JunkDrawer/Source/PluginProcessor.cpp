@@ -39,7 +39,7 @@ JunkDrawerProcessor::JunkDrawerProcessor()
         audition[(size_t) t] = 0; playing[(size_t) t] = 0; loadToken[(size_t) t] = 0;
         tp[(size_t) t] = { state.getRawParameterValue (jd::trackId (t, "mute")), state.getRawParameterValue (jd::trackId (t, "solo")),
                            state.getRawParameterValue (jd::trackId (t, "level")), state.getRawParameterValue (jd::trackId (t, "pan")),
-                           state.getRawParameterValue (jd::trackId (t, "tune")) };
+                           state.getRawParameterValue (jd::trackId (t, "tune")), state.getRawParameterValue (jd::trackId (t, "order")) };
         for (int r = 0; r < jd::kRegions; ++r)
         {
             auto g = [&] (const char* s) { return state.getRawParameterValue (jd::regionId (t, r, s)); };
@@ -532,6 +532,14 @@ void JunkDrawerProcessor::applyStep (int t, SeqTrack& q, long long step, int pat
     const int count = juce::roundToInt (regCount[(size_t) t]->load());
     q.region = juce::roundToInt (at (jd::LaneRegion));
     if (q.region > count) q.region = 0;
+    if (q.region > 0 && count > 1)
+    {
+        // Region order: the written number only says "play something here"; the order decides which region.
+        const int mode = juce::roundToInt (tp[(size_t) t].order->load());
+        if (mode == 1) q.region = 1 + (int) (step % count);
+        else if (mode == 2) { const int per = 2 * (count - 1), k = (int) (step % per); q.region = 1 + (k < count ? k : per - k); }
+        else if (mode == 3) q.region = 1 + juce::jmin (count - 1, (int) (jd::hash01 ((juce::uint32) (step * 69069LL + (long long) t * 1013LL + 5LL)) * (float) count));
+    }
     q.vol = at (jd::LaneVolume);
     q.pitch = at (jd::LanePitch);
     q.ratchet = juce::jlimit (1, 4, juce::roundToInt (at (jd::LaneRatchet)));

@@ -1031,6 +1031,11 @@ struct Liner : juce::Component, juce::FileDragAndDropTarget
             edit.addItem (100 + i, "Pattern " + letter, true, i == proc.editPattern());
             copyTo.addItem (200 + i, "Pattern " + letter, i != proc.editPattern());
         }
+        juce::PopupMenu order;
+        static const char* orderNames[] = { "As written", "Walk through the regions", "Pendulum", "Random" };
+        const int curOrder = juce::roundToInt (proc.state.getRawParameterValue (jd::trackId (track, "order"))->load());
+        for (int i = 0; i < 4; ++i) order.addItem (300 + i, orderNames[i], true, i == curOrder);
+        m.addSubMenu ("Region order", order);
         m.addSubMenu ("Edit pattern", edit);
         m.addSubMenu ("Copy this pattern to", copyTo);
         m.addItem (5, "Clear this pattern");
@@ -1042,6 +1047,7 @@ struct Liner : juce::Component, juce::FileDragAndDropTarget
             else if (r == 3) proc.humanizeLane (track, lane);
             else if (r == 4) proc.resetLane (track, lane);
             else if (r == 5) proc.clearPattern();
+            else if (r >= 300 && r < 304) setNorm (proc, jd::trackId (track, "order"), (float) (r - 300));
             else if (r >= 100 && r < 100 + jd::kPatterns) proc.setEditPattern (r - 100);
             else if (r >= 200 && r < 200 + jd::kPatterns) proc.copyPatternTo (r - 200);
             syncPatternLabel();
