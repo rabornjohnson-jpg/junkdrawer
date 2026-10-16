@@ -44,3 +44,8 @@ No text below 11 px. No overlapping or crowded text. American English. Every con
 | `PluginEditor.*` | Header and the four pages |
 | `Ui.h` | Palette, wood knob, segmented control, panel, shared drawing |
 | `Tests/UiSnapshot.cpp` | Page renders and the layout check |
+
+## Status
+
+- Stage 1-2 done: load a sample into any of the 8 tracks (Browse or drag and drop), cut it into up to 6 regions (equal, by hits, or by hand with edge snapping), and audition regions and the whole sample. Each region has pitch, gain, pan, filter, drive, ADSR, loop mode and reverse.
+- Next: the step sequencer, then the LFO and Matrix engine, the Master page effects, and the 100 factory drawers.

@@ -1,5 +1,6 @@
 #pragma once
 #include <juce_audio_processors/juce_audio_processors.h>
+#include "Sample.h"
 
 // Every parameter lives here, so the processor, the editor and (later) the LFO engine agree on the IDs.
 namespace jd
@@ -9,6 +10,9 @@ constexpr int kLfos   = 6;
 
 inline juce::String trackId (int track, const char* suffix) { return "t" + juce::String (track + 1) + "_" + suffix; }
 inline juce::String lfoId   (int lfo,   const char* suffix) { return "l" + juce::String (lfo + 1)   + "_" + suffix; }
+
+inline juce::String regionId (int track, int region, const char* suffix) { return "t" + juce::String (track + 1) + "_r" + juce::String (region + 1) + "_" + suffix; }
+inline const juce::StringArray kLoopModes { "One-shot", "Loop", "Ping-pong" };
 
 inline const juce::StringArray kLfoShapes   { "Sine", "Tri", "Saw", "Sq", "S+H", "Rand", "Drift" };
 inline const juce::StringArray kLfoSyncs    { "Free", "Sync", "Dotted", "Triplet" };
@@ -129,6 +133,8 @@ inline juce::AudioProcessorValueTreeState::ParameterLayout createLayout()
     addFloat  (l, "fx_lim_mix",     "Mix",     { 0.f, 1.f, 0.001f }, 1.f, pct());
     addChoice (l, "fx_lim_look",    "Lookahead", { "Off", "1 ms", "5 ms" }, 1);
 
+    addChoice (l, "snap", "Snap region edges", { "Off", "Hit", "Zero" }, 1);
+
     // ---- Tracks (mute, solo, level, pan; regions and steps arrive in Stages 2 and 3) ------------------------------
     for (int t = 0; t < kTracks; ++t)
     {
@@ -137,6 +143,26 @@ inline juce::AudioProcessorValueTreeState::ParameterLayout createLayout()
         addBool  (l, trackId (t, "solo"),  n + "solo", false);
         addFloat (l, trackId (t, "level"), n + "level", { -60.f, 6.f, 0.01f }, 0.f, db());
         addFloat (l, trackId (t, "pan"),   n + "pan",   { -1.f, 1.f, 0.001f }, 0.f);
+        l.add (std::make_unique<juce::AudioParameterInt> (juce::ParameterID { trackId (t, "regions"), 1 }, n + "regions", 1, kRegions, 4));
+
+        for (int r = 0; r < kRegions; ++r)
+        {
+            const juce::String rn = n + "region " + juce::String (r + 1) + " ";
+            addFloat  (l, regionId (t, r, "start"),  rn + "start",   { 0.f, 1.f, 0.00001f }, (float) r / (float) kRegions);
+            addFloat  (l, regionId (t, r, "end"),    rn + "end",     { 0.f, 1.f, 0.00001f }, (float) (r + 1) / (float) kRegions);
+            addFloat  (l, regionId (t, r, "pitch"),  rn + "pitch",   { -24.f, 24.f, 0.01f }, 0.f, semis());
+            addFloat  (l, regionId (t, r, "gain"),   rn + "gain",    { -24.f, 12.f, 0.01f }, 0.f, db());
+            addFloat  (l, regionId (t, r, "pan"),    rn + "pan",     { -1.f, 1.f, 0.001f }, 0.f);
+            addFloat  (l, regionId (t, r, "cutoff"), rn + "cutoff",  skewed (20.f, 20000.f, 1000.f), 20000.f, hz());
+            addFloat  (l, regionId (t, r, "reso"),   rn + "reso",    { 0.f, 1.f, 0.001f }, 0.2f, pct());
+            addFloat  (l, regionId (t, r, "drive"),  rn + "drive",   { 0.f, 18.f, 0.01f }, 0.f, db());
+            addFloat  (l, regionId (t, r, "attack"), rn + "attack",  skewed (0.f, 2000.f, 80.f), 2.f, ms());
+            addFloat  (l, regionId (t, r, "decay"),  rn + "decay",   skewed (1.f, 5000.f, 300.f), 90.f, ms());
+            addFloat  (l, regionId (t, r, "sustain"),rn + "sustain", { 0.f, 1.f, 0.001f }, 1.f, pct());
+            addFloat  (l, regionId (t, r, "release"),rn + "release", skewed (3.f, 5000.f, 300.f), 50.f, ms());
+            addChoice (l, regionId (t, r, "loop"),   rn + "loop mode", kLoopModes, 0);
+            addBool   (l, regionId (t, r, "reverse"),rn + "reverse", false);
+        }
     }
 
     // ---- LFOs (settings only; the engine and the assignments arrive in Stage 5) ----------------------------------

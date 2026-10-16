@@ -79,6 +79,45 @@ int main (int argc, char** argv)
     auto* editor = dynamic_cast<JunkDrawerEditor*> (ed.get());
     const char* names[] = { "drawer", "lfos", "master", "matrix" };
     int problems = 0;
+
+    // empty drawer first, then one with a generated sample in track 1 (a few decaying hits)
+    {
+        editor->showPage (0);
+        for (int i = 0; i < 4; ++i) juce::MessageManager::getInstance()->runDispatchLoopUntil (40);
+        auto img = editor->createComponentSnapshot (editor->getLocalBounds(), true, 1.0f);
+        juce::PNGImageFormat png;
+        auto f = out.getChildFile ("drawer_empty.png");
+        f.deleteFile();
+        juce::FileOutputStream fs (f);
+        png.writeImageToStream (img, fs);
+        problems += checkLayout (*editor, "drawer-empty");
+    }
+    {
+        auto wav = out.getChildFile ("test_hits.wav");
+        wav.deleteFile();
+        juce::WavAudioFormat fmt;
+        std::unique_ptr<juce::AudioFormatWriter> w (fmt.createWriterFor (new juce::FileOutputStream (wav), 44100.0, 2, 16, {}, 0));
+        const int n = 44100 * 3;
+        juce::AudioBuffer<float> b (2, n);
+        const double hitAt[] = { 0.0, 0.55, 1.1, 1.45, 2.05, 2.5 };
+        for (int i = 0; i < n; ++i)
+        {
+            float v = 0.f;
+            for (double h : hitAt)
+            {
+                const double t = i / 44100.0 - h;
+                if (t >= 0.0) v += (float) (std::exp (-t * 9.0) * std::sin (t * 2.0 * juce::MathConstants<double>::pi * (140.0 + 90.0 * h)));
+            }
+            b.setSample (0, i, 0.6f * v); b.setSample (1, i, 0.6f * v);
+        }
+        w->writeFromAudioSampleBuffer (b, 0, n);
+        w.reset();
+        proc.loadFile (0, wav, false);
+        for (int i = 0; i < 100 && proc.getTrack (0) == nullptr; ++i) juce::MessageManager::getInstance()->runDispatchLoopUntil (50);
+        proc.sliceByHits (0, 6);
+        editor->showPage (0);
+        for (int i = 0; i < 6; ++i) juce::MessageManager::getInstance()->runDispatchLoopUntil (40);
+    }
     for (int p = 0; p < JunkDrawerEditor::NumPages; ++p)
     {
         editor->showPage (p);

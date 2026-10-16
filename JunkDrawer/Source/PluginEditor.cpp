@@ -146,8 +146,401 @@ struct JunkDrawerEditor::Header : juce::Component, juce::Timer
 };
 
 //==============================================================================
+// The open track: waveform with draggable regions, slice tools, and the tag for the selected region.
+namespace
+{
+using Proc = JunkDrawerProcessor;
+
+void setNorm (Proc& p, const juce::String& id, float plain)
+{
+    auto* prm = p.state.getParameter (id);
+    prm->setValueNotifyingHost (prm->convertTo0to1 (plain));
+}
+
+float plainValue (Proc& p, const juce::String& id) { return p.state.getRawParameterValue (id)->load(); }
+
+juce::String seconds (double s) { return juce::String (s, s < 10.0 ? 2 : 1) + " s"; }
+
+struct WaveView : juce::Component, juce::SettableTooltipClient
+{
+    explicit WaveView (Proc& p) : proc (p)
+    {
+        setTooltip ("Drag a region edge to move it. Click inside a region to pick it and hear it.");
+    }
+
+    void setTrack (int t, int sel) { track = t; selected = sel; peaksFor = nullptr; repaint(); }
+    void setSelected (int r) { selected = r; repaint(); }
+    int regionCount() const { return juce::roundToInt (plainValue (proc, jd::trackId (track, "regions"))); }
+    float edge (int r, bool end) const { return plainValue (proc, jd::regionId (track, r, end ? "end" : "start")); }
+
+    std::function<void (int)> onPick;
+
+    void resized() override { peaksFor = nullptr; }
+
+    void paint (juce::Graphics& g) override
+    {
+        auto r = getLocalBounds().toFloat();
+        g.setColour (juce::Colour (0xff1b120b));
+        g.fillRoundedRectangle (r, 4.f);
+
+        auto td = proc.getTrack (track);
+        if (td == nullptr) return;
+        buildPeaks (td);
+
+        const int w = getWidth(), h = getHeight(), mid = h / 2;
+        const int n = regionCount();
+        static const juce::uint32 tints[] = { 0xffe9b872, 0xff9bc4a0, 0xffc98f7a, 0xff8fb0d4, 0xffd4c06a, 0xffb59ad1 };
+
+        for (int i = 0; i < n; ++i)
+        {
+            const float a = edge (i, false) * (float) w, b = edge (i, true) * (float) w;
+            const auto box = juce::Rectangle<float> (juce::jmin (a, b), 2.f, std::abs (b - a), (float) h - 4.f);
+            g.setColour (juce::Colour (tints[i]).withAlpha (i == selected ? 0.34f : 0.16f));
+            g.fillRect (box);
+        }
+
+        g.setColour (pal::text.withAlpha (0.9f));
+        for (int x = 0; x < w && x < (int) mins.size(); ++x)
+        {
+            const float top = (float) mid - maxs[(size_t) x] * (float) (mid - 6), bot = (float) mid - mins[(size_t) x] * (float) (mid - 6);
+            g.fillRect ((float) x, top, 1.f, juce::jmax (1.f, bot - top));
+        }
+
+        for (int i = 0; i < n; ++i)
+        {
+            const float a = edge (i, false) * (float) w, b = edge (i, true) * (float) w;
+            const bool sel = i == selected;
+            g.setColour (juce::Colour (tints[i]).withAlpha (sel ? 1.f : 0.65f));
+            g.fillRect (a - 1.f, 2.f, 2.f, (float) h - 4.f);
+            g.fillRect (b - 1.f, 2.f, 2.f, (float) h - 4.f);
+            if (std::abs (b - a) > 26.f)
+            {
+                const auto tab = juce::Rectangle<float> (juce::jmin (a, b) + 4.f, 6.f, 18.f, 16.f);
+                g.setColour (juce::Colour (tints[i]));
+                g.fillRoundedRectangle (tab, 3.f);
+                drawText (g, juce::String (i + 1), tab.toNearestInt(), mono (11.f, true), pal::amberInk, juce::Justification::centred);
+            }
+        }
+    }
+
+    void mouseMove (const juce::MouseEvent& e) override
+    {
+        setMouseCursor (findEdge (e.x).first >= 0 ? juce::MouseCursor::LeftRightResizeCursor : juce::MouseCursor::NormalCursor);
+    }
+
+    void mouseDown (const juce::MouseEvent& e) override
+    {
+        if (proc.getTrack (track) == nullptr) return;
+        dragRegion = -1;
+        auto [r, isEnd] = findEdge (e.x);
+        if (r >= 0)
+        {
+            dragRegion = r; dragEnd = isEnd;
+            if (r != selected) { selected = r; if (onPick) onPick (r); }
+            proc.state.getParameter (jd::regionId (track, r, isEnd ? "end" : "start"))->beginChangeGesture();
+            return;
+        }
+        // click inside a region: pick the narrowest one that contains the point
+        const float nx = (float) e.x / (float) juce::jmax (1, getWidth());
+        int best = -1;
+        float bestLen = 2.f;
+        for (int i = 0; i < regionCount(); ++i)
+        {
+            const float a = juce::jmin (edge (i, false), edge (i, true)), b = juce::jmax (edge (i, false), edge (i, true));
+            if (nx >= a && nx <= b && b - a < bestLen) { best = i; bestLen = b - a; }
+        }
+        if (best >= 0) { selected = best; if (onPick) onPick (best); proc.auditionRegion (track, best); repaint(); }
+    }
+
+    void mouseDrag (const juce::MouseEvent& e) override
+    {
+        if (dragRegion < 0) return;
+        const float minGap = 0.003f;
+        float v = snapped (juce::jlimit (0.f, 1.f, (float) e.x / (float) juce::jmax (1, getWidth())));
+        const float other = edge (dragRegion, ! dragEnd);
+        v = dragEnd ? juce::jlimit (other + minGap, 1.f, v) : juce::jlimit (0.f, other - minGap, v);
+        setNorm (proc, jd::regionId (track, dragRegion, dragEnd ? "end" : "start"), v);
+        repaint();
+    }
+
+    void mouseUp (const juce::MouseEvent&) override
+    {
+        if (dragRegion >= 0)
+        {
+            proc.state.getParameter (jd::regionId (track, dragRegion, dragEnd ? "end" : "start"))->endChangeGesture();
+            dragRegion = -1;
+        }
+    }
+
+private:
+    std::pair<int, bool> findEdge (int x) const
+    {
+        if (proc.getTrack (track) == nullptr) return { -1, false };
+        const float w = (float) getWidth();
+        int bestR = -1;
+        bool bestEnd = false;
+        float bestD = 7.f;
+        for (int pass = 0; pass < 2; ++pass)                    // the selected region's edges win ties
+            for (int i = 0; i < regionCount(); ++i)
+            {
+                if ((pass == 0) != (i == selected)) continue;
+                for (bool end : { false, true })
+                {
+                    const float d = std::abs (edge (i, end) * w - (float) x);
+                    if (d < bestD) { bestD = d; bestR = i; bestEnd = end; }
+                }
+            }
+        return { bestR, bestEnd };
+    }
+
+    float snapped (float n) const
+    {
+        auto td = proc.getTrack (track);
+        if (td == nullptr) return n;
+        const int mode = juce::roundToInt (plainValue (proc, "snap"));
+        if (mode == 1) return jd::snapToOnset (proc.hitsFor (track), td->seconds(), n);
+        if (mode == 2) return jd::snapToZero (td->audio, td->sampleRate, n);
+        return n;
+    }
+
+    void buildPeaks (const std::shared_ptr<const jd::TrackData>& td)
+    {
+        if (peaksFor == td.get() && (int) mins.size() == getWidth()) return;
+        peaksFor = td.get();
+        const int w = juce::jmax (1, getWidth()), len = td->length();
+        mins.assign ((size_t) w, 0.f);
+        maxs.assign ((size_t) w, 0.f);
+        const float* l = td->audio.getReadPointer (0);
+        const float* r = td->audio.getReadPointer (1);
+        for (int x = 0; x < w; ++x)
+        {
+            const int a = (int) ((juce::int64) x * len / w), b = juce::jmax (a + 1, (int) ((juce::int64) (x + 1) * len / w));
+            float lo = 0.f, hi = 0.f;
+            for (int i = a; i < b && i < len; ++i) { const float m = 0.5f * (l[i] + r[i]); lo = juce::jmin (lo, m); hi = juce::jmax (hi, m); }
+            mins[(size_t) x] = lo; maxs[(size_t) x] = hi;
+        }
+    }
+
+    Proc& proc;
+    int track = 0, selected = 0, dragRegion = -1;
+    bool dragEnd = false;
+    const jd::TrackData* peaksFor = nullptr;
+    std::vector<float> mins, maxs;
+};
+
+// Everything about the selected region: Pitch, Gain, Pan / Cutoff, Reso, Drive / loop mode, Reverse / A D S R.
+struct RegionTag : Panel
+{
+    RegionTag (Proc& p, int track, int region) : Panel(), proc (p), tr (track), reg (region)
+    {
+        auto& s = p.state;
+        const char* ids[]   = { "pitch", "gain", "pan", "cutoff", "reso", "drive" };
+        const char* names[] = { "Pitch", "Gain", "Pan", "Cutoff", "Reso", "Drive" };
+        for (int k = 0; k < 6; ++k) { main[(size_t) k] = std::make_unique<Knob> (s, jd::regionId (track, region, ids[k]), names[k], 38); addAndMakeVisible (*main[(size_t) k]); }
+        const char* eIds[]   = { "attack", "decay", "sustain", "release" };
+        const char* eNames[] = { "A", "D", "S", "R" };
+        for (int k = 0; k < 4; ++k) { env[(size_t) k] = std::make_unique<Knob> (s, jd::regionId (track, region, eIds[k]), eNames[k], 30); addAndMakeVisible (*env[(size_t) k]); }
+        loop = std::make_unique<Seg> (s, jd::regionId (track, region, "loop"), jd::kLoopModes);
+        loop->setTooltip ("What happens when playback reaches the end of the region");
+        addAndMakeVisible (*loop);
+        rev.setButtonText ("Reverse");
+        rev.setClickingTogglesState (true);
+        rev.setTooltip ("Play this region backwards");
+        addAndMakeVisible (rev);
+        revAtt = std::make_unique<juce::ButtonParameterAttachment> (*s.getParameter (jd::regionId (track, region, "reverse")), rev, nullptr);
+        wStart = std::make_unique<Watch> (s, jd::regionId (track, region, "start"), *this);
+        wEnd   = std::make_unique<Watch> (s, jd::regionId (track, region, "end"), *this);
+    }
+
+    void resized() override
+    {
+        for (int k = 0; k < 6; ++k) main[(size_t) k]->setBounds (6 + (k % 3) * 68, 34 + (k / 3) * 80, 68, 76);
+        loop->setBounds (12, 198, getWidth() - 24, 24);
+        rev.setBounds (12, 228, 90, 24);
+        for (int k = 0; k < 4; ++k) env[(size_t) k]->setBounds (10 + k * 49, 318, 49, 64);
+    }
+
+    void paint (juce::Graphics& g) override
+    {
+        Panel::paint (g);
+        drawStripLabel (g, "REGION " + juce::String (reg + 1), 12, 12);
+        auto td = proc.getTrack (tr);
+        const double dur = td != nullptr ? td->seconds() : 0.0;
+        const float a = plainValue (proc, jd::regionId (tr, reg, "start")), b = plainValue (proc, jd::regionId (tr, reg, "end"));
+        drawText (g, "Start " + seconds (a * dur), { 12, 258, getWidth() - 24, 16 }, mono (11.f), pal::amber);
+        drawText (g, "End " + seconds (b * dur), { 12, 274, getWidth() - 24, 16 }, mono (11.f), pal::amber);
+        drawStripLabel (g, "ENVELOPE", 12, 298);
+    }
+
+    Proc& proc;
+    int tr, reg;
+    std::array<std::unique_ptr<Knob>, 6> main;
+    std::array<std::unique_ptr<Knob>, 4> env;
+    std::unique_ptr<Seg> loop;
+    juce::TextButton rev;
+    std::unique_ptr<juce::ButtonParameterAttachment> revAtt;
+    std::unique_ptr<Watch> wStart, wEnd;
+};
+
+struct Liner : juce::Component, juce::FileDragAndDropTarget
+{
+    explicit Liner (Proc& p) : proc (p), wave (p)
+    {
+        browse.setButtonText ("Browse");  browse.setTooltip ("Pick a sound file. You can also drop one anywhere on this paper.");
+        clear.setButtonText ("Clear");    clear.setTooltip ("Take the sound out of this track");
+        sliceEq.setButtonText ("Slice equal");     sliceEq.setTooltip ("Cut the sound into equal regions");
+        sliceHit.setButtonText ("Slice by hits");  sliceHit.setTooltip ("Cut the sound where the loudest hits start");
+        add.setButtonText ("+ Region");   add.setTooltip ("Split the longest region in two");
+        sub.setButtonText ("- Region");   sub.setTooltip ("Remove the last region");
+        play.setButtonText ("Play all");  play.setTooltip ("Hear the whole sound");
+        stop.setButtonText ("Stop");
+        for (auto* b : { &browse, &clear, &sliceEq, &sliceHit, &add, &sub, &play, &stop }) addAndMakeVisible (*b);
+        addAndMakeVisible (wave);
+        snap = std::make_unique<Seg> (p.state, "snap", juce::StringArray { "Off", "Hit", "Zero" });
+        snap->setTooltip ("Off: edges go where you drop them. Hit: they stick to the nearest loud hit. Zero: they stick to the nearest quiet crossing, so there are no clicks.");
+        addAndMakeVisible (*snap);
+
+        browse.onClick = [this] { openChooser(); };
+        clear.onClick = [this] { proc.clearTrack (track); };
+        sliceEq.onClick = [this] { proc.sliceEqual (track, regionCount()); };
+        sliceHit.onClick = [this] { proc.sliceByHits (track, regionCount()); };
+        add.onClick = [this] { proc.addRegion (track); };
+        sub.onClick = [this] { proc.removeRegion (track); if (selected >= regionCount()) pick (regionCount() - 1); };
+        play.onClick = [this] { proc.auditionWhole (track); };
+        stop.onClick = [this] { proc.stopAudition (track); };
+        wave.onPick = [this] (int r) { pick (r); };
+        setTrack (0);
+    }
+
+    int regionCount() const { return juce::roundToInt (plainValue (proc, jd::trackId (track, "regions"))); }
+
+    void setTrack (int t)
+    {
+        track = t;
+        selected = juce::jlimit (0, juce::jmax (0, regionCount() - 1), regions[(size_t) t]);
+        wave.setTrack (track, selected);
+        buildTag();
+        refresh();
+    }
+
+    void pick (int r)
+    {
+        selected = juce::jlimit (0, juce::jmax (0, regionCount() - 1), r);
+        regions[(size_t) track] = selected;
+        wave.setSelected (selected);
+        buildTag();
+    }
+
+    void buildTag()
+    {
+        tag.reset();
+        if (proc.getTrack (track) == nullptr) return;
+        tag = std::make_unique<RegionTag> (proc, track, selected);
+        addAndMakeVisible (*tag);
+        resized();
+    }
+
+    // Called when a sample finished loading, was cleared, or the region count changed.
+    void refresh()
+    {
+        const bool loaded = proc.getTrack (track) != nullptr;
+        if (selected >= regionCount()) pick (regionCount() - 1);
+        if (loaded && tag == nullptr) buildTag();
+        if (! loaded) tag.reset();
+        for (auto* c : std::initializer_list<juce::Component*> { &wave, &clear, &sliceEq, &sliceHit, &add, &sub, &play, &stop, snap.get() })
+            c->setVisible (loaded);
+        if (tag != nullptr) tag->setVisible (loaded);
+        const auto m = proc.takeLoadMessage();
+        if (m.isNotEmpty()) message = m;
+        else if (loaded) message = {};
+        resized();
+        repaint();
+    }
+
+    void resized() override
+    {
+        const bool loaded = proc.getTrack (track) != nullptr;
+        clear.setBounds (16 + 656 - 70, 12, 70, 28);
+        browse.setBounds (loaded ? 16 + 656 - 70 - 8 - 80 : (getWidth() - 120) / 2, loaded ? 12 : 268, 80 + (loaded ? 0 : 40), 28);
+        wave.setBounds (16, 56, 656, 204);
+        sliceEq.setBounds (16, 270, 92, 26);
+        sliceHit.setBounds (114, 270, 104, 26);
+        add.setBounds (224, 270, 80, 26);
+        sub.setBounds (310, 270, 80, 26);
+        snap->setBounds (522, 270, 150, 26);
+        play.setBounds (16, 304, 84, 26);
+        stop.setBounds (106, 304, 70, 26);
+        if (tag != nullptr) tag->setBounds (getWidth() - 216 - 12, 10, 216, 406);
+    }
+
+    void paint (juce::Graphics& g) override
+    {
+        const auto ink = juce::Colour (0xff2a1b10);
+        auto r = getLocalBounds().toFloat();
+        g.setGradientFill (juce::ColourGradient (juce::Colour (0xffd3c8a7), 0.f, 0.f, juce::Colour (0xffc2b58f), 0.f, r.getHeight(), false));
+        g.fillRect (r);
+        g.setColour (juce::Colour (0x99281608));
+        g.drawRect (r, 1.f);
+
+        // the controls are cream on dark, so each one sits on a dark pad set into the paper
+        g.setColour (juce::Colour (0xf0241710));
+        for (auto* c : std::initializer_list<juce::Component*> { &browse, &clear, &sliceEq, &sliceHit, &add, &sub, &play, &stop, snap.get() })
+            if (c->isVisible()) g.fillRoundedRectangle (c->getBounds().toFloat(), 4.f);
+
+        auto td = proc.getTrack (track);
+        if (td == nullptr)
+        {
+            drawText (g, "Nothing in here yet.", getLocalBounds().withHeight (200).withY (80), serif (26.f, false), ink, juce::Justification::centred);
+            drawText (g, "Drop something in.", getLocalBounds().withHeight (30).withY (200), sans (14.f), ink.withAlpha (0.8f), juce::Justification::centred);
+            drawText (g, "WAV, AIFF, FLAC, MP3 and Ogg all fit.", getLocalBounds().withHeight (20).withY (312), sans (12.f), ink.withAlpha (0.65f), juce::Justification::centred);
+        }
+        else
+        {
+            drawText (g, td->name, { 16, 10, 656 - 70 - 8 - 80 - 12, 22 }, serif (18.f, false), ink);
+            drawText (g, seconds (td->seconds()) + "  " + juce::String::charToString (0x00b7) + "  " + juce::String (regionCount()) + (regionCount() == 1 ? " region" : " regions"),
+                      { 16, 32, 656 - 70 - 8 - 80 - 12, 16 }, sans (11.f), ink.withAlpha (0.75f));
+            drawText (g, "Snap edges", { 436, 270, 80, 26 }, sans (11.f, true), ink.withAlpha (0.8f), juce::Justification::centredRight);
+        }
+        if (message.isNotEmpty())
+            drawText (g, message, { 16, td == nullptr ? 350 : 340, 656, 34 }, sans (12.f), juce::Colour (0xff7a2e16), td == nullptr ? juce::Justification::centred : juce::Justification::centredLeft);
+    }
+
+    bool isInterestedInFileDrag (const juce::StringArray& files) override { return files.size() > 0 && isSupported (juce::File (files[0])); }
+    void filesDropped (const juce::StringArray& files, int, int) override
+    {
+        if (files.size() > 0 && isSupported (juce::File (files[0]))) proc.loadFile (track, juce::File (files[0]));
+    }
+
+    static bool isSupported (const juce::File& f)
+    {
+        return f.hasFileExtension ("wav;aif;aiff;flac;mp3;ogg");
+    }
+
+    void openChooser()
+    {
+        chooser = std::make_unique<juce::FileChooser> ("Pick a sound", juce::File::getSpecialLocation (juce::File::userMusicDirectory), "*.wav;*.aif;*.aiff;*.flac;*.mp3;*.ogg");
+        chooser->launchAsync (juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectFiles, [this] (const juce::FileChooser& fc)
+        {
+            const auto f = fc.getResult();
+            if (f.existsAsFile()) proc.loadFile (track, f);
+        });
+    }
+
+    Proc& proc;
+    int track = 0, selected = 0;
+    std::array<int, jd::kTracks> regions {};
+    WaveView wave;
+    std::unique_ptr<RegionTag> tag;
+    std::unique_ptr<Seg> snap;
+    juce::TextButton browse, clear, sliceEq, sliceHit, add, sub, play, stop;
+    juce::String message;
+    std::unique_ptr<juce::FileChooser> chooser;
+};
+} // namespace
+
+//==============================================================================
 // Drawer page
-struct JunkDrawerEditor::DrawerPage : juce::Component
+struct JunkDrawerEditor::DrawerPage : juce::Component, juce::ChangeListener
 {
     struct LfoTile : juce::Component, juce::SettableTooltipClient
     {
@@ -184,8 +577,9 @@ struct JunkDrawerEditor::DrawerPage : juce::Component
 
     struct TrackRow : juce::Component
     {
-        TrackRow (APVTS& s, int t) : track (t)
+        TrackRow (JunkDrawerProcessor& p, int t) : proc (p), track (t)
         {
+            auto& s = p.state;
             m.setButtonText ("M"); s_.setButtonText ("S");
             m.setClickingTogglesState (true); s_.setClickingTogglesState (true);
             m.setTooltip ("Mute track " + juce::String (t + 1));
@@ -195,31 +589,43 @@ struct JunkDrawerEditor::DrawerPage : juce::Component
             as = std::make_unique<juce::ButtonParameterAttachment> (*s.getParameter (jd::trackId (t, "solo")), s_, nullptr);
         }
         void resized() override { m.setBounds (204, 10, 22, 26); s_.setBounds (230, 10, 22, 26); }
+        void mouseDown (const juce::MouseEvent&) override { if (onPick) onPick (track); }
         void paint (juce::Graphics& g) override
         {
             auto r = getLocalBounds().toFloat();
             g.setColour (juce::Colour (0xc7120905));
             g.fillRoundedRectangle (r, 3.f);
-            g.setColour (juce::Colour (0x29ffebbe));
-            g.drawRoundedRectangle (r.reduced (0.5f), 3.f, 1.f);
+            g.setColour (picked ? pal::amber : juce::Colour (0x29ffebbe));
+            g.drawRoundedRectangle (r.reduced (0.5f), 3.f, picked ? 2.f : 1.f);
 
             const juce::Rectangle<float> badge (10.f, 10.f, 28.f, 28.f);
             g.setGradientFill (juce::ColourGradient (juce::Colour (0xfff3dc98), 14.f, 14.f, juce::Colour (0xff6d4e1d), 34.f, 36.f, true));
             g.fillEllipse (badge);
             drawText (g, juce::String (track + 1).paddedLeft ('0', 2), badge.toNearestInt(), mono (12.f, true), juce::Colour (0xff2a1b10), juce::Justification::centred);
 
+            auto td = proc.getTrack (track);
             const juce::Rectangle<float> card (46.f, 10.f, 150.f, 26.f);
             g.setColour (juce::Colour (0xfff6eed6));
             g.fillRect (card);
             g.setColour (pal::brass);
             g.drawRect (card.expanded (1.5f), 1.5f);
-            drawText (g, "Track " + juce::String (track + 1), card.toNearestInt().reduced (8, 0), mono (13.f), juce::Colour (0xff7a6140));
+            drawText (g, td != nullptr ? td->name : "Track " + juce::String (track + 1), card.toNearestInt().reduced (8, 0), mono (13.f), juce::Colour (0xff7a6140));
 
-            drawText (g, "Nothing in here yet.", { 46, 46, 200, 20 }, sans (12.f), juce::Colour (0xffd9c39a));
+            if (td != nullptr)
+            {
+                const int n = juce::roundToInt (proc.state.getRawParameterValue (jd::trackId (track, "regions"))->load());
+                drawText (g, seconds (td->seconds()) + " " + juce::String::charToString (0x00b7) + " " + juce::String (n) + (n == 1 ? " region" : " regions"),
+                          { 46, 46, 200, 20 }, sans (12.f), juce::Colour (0xffd9c39a));
+            }
+            else
+                drawText (g, "Nothing in here yet.", { 46, 46, 200, 20 }, sans (12.f), juce::Colour (0xffd9c39a));
             g.setColour (juce::Colour (0x80000000));
             g.fillRoundedRectangle (252.f, 12.f, 8.f, 56.f, 3.f);
         }
+        JunkDrawerProcessor& proc;
         int track;
+        bool picked = false;
+        std::function<void (int)> onPick;
         juce::TextButton m, s_;
         std::unique_ptr<juce::ButtonParameterAttachment> am, as;
     };
@@ -240,11 +646,30 @@ struct JunkDrawerEditor::DrawerPage : juce::Component
             pillAtt[(size_t) i] = std::make_unique<juce::ButtonParameterAttachment> (*st.getParameter (fxIds[i]), pills[(size_t) i], nullptr);
         }
         for (int i = 0; i < jd::kLfos; ++i) { tiles[(size_t) i] = std::make_unique<LfoTile> (st, i); addAndMakeVisible (*tiles[(size_t) i]); }
-        for (int t = 0; t < jd::kTracks; ++t) { rows[(size_t) t] = std::make_unique<TrackRow> (st, t); addAndMakeVisible (*rows[(size_t) t]); }
+        for (int t = 0; t < jd::kTracks; ++t) { rows[(size_t) t] = std::make_unique<TrackRow> (ed.proc, t); rows[(size_t) t]->onPick = [this] (int i) { pickTrack (i); }; addAndMakeVisible (*rows[(size_t) t]); }
+        liner = std::make_unique<Liner> (ed.proc);
+        addAndMakeVisible (*liner);
+        rows[0]->picked = true;
+        ed.proc.addChangeListener (this);
+    }
+
+    ~DrawerPage() override { ed.proc.removeChangeListener (this); }
+
+    void pickTrack (int t)
+    {
+        for (int i = 0; i < jd::kTracks; ++i) { rows[(size_t) i]->picked = i == t; rows[(size_t) i]->repaint(); }
+        liner->setTrack (t);
+    }
+
+    void changeListenerCallback (juce::ChangeBroadcaster*) override
+    {
+        for (auto& r : rows) r->repaint();
+        liner->refresh();
     }
 
     void resized() override
     {
+        liner->setBounds (328, 122, 908, 426);
         out->setBounds (62, 32, 58, 62);
         for (int i = 0; i < 4; ++i) pills[(size_t) i].setBounds (180 + i * 68, 34, 62, 24);
         for (int i = 0; i < jd::kLfos; ++i) tiles[(size_t) i]->setBounds (520 + i * 118, 34, 112, 52);
@@ -267,17 +692,6 @@ struct JunkDrawerEditor::DrawerPage : juce::Component
         drawText (g, "Details on the Master page", { 180, 66, 260, 16 }, sans (11.f), pal::textDim);
         g.setColour (pal::line); g.fillRect (470, 22, 1, 62);
         drawStripLabel (g, "LFOS", 520, 16);
-
-        // the open track's paper liner (loading and regions arrive in Stages 1 and 2)
-        const juce::Rectangle<float> liner (328.f, 122.f, 908.f, 426.f);
-        g.setGradientFill (juce::ColourGradient (juce::Colour (0xffd3c8a7), liner.getX(), liner.getY(), juce::Colour (0xffc2b58f), liner.getX(), liner.getBottom(), false));
-        g.fillRect (liner);
-        g.setColour (juce::Colour (0x99281608));
-        g.drawRect (liner, 1.f);
-        const auto ink = juce::Colour (0xff2a1b10);
-        drawText (g, "Nothing in here yet.", liner.toNearestInt().withTrimmedBottom (40), serif (26.f, false), ink, juce::Justification::centred);
-        drawText (g, "Drop something in.", liner.toNearestInt().withTrimmedTop (200).withHeight (30), sans (14.f), ink.withAlpha (0.8f), juce::Justification::centred);
-        drawText (g, "Loading samples and cutting regions are the next stages of the build.", liner.toNearestInt().withTrimmedTop (390), sans (12.f), ink.withAlpha (0.65f), juce::Justification::centred);
 
         // junk compartment with the brass nameplate
         g.setColour (juce::Colour (0xb8120903));
@@ -303,6 +717,7 @@ struct JunkDrawerEditor::DrawerPage : juce::Component
     std::array<std::unique_ptr<juce::ButtonParameterAttachment>, 4> pillAtt;
     std::array<std::unique_ptr<LfoTile>, jd::kLfos> tiles;
     std::array<std::unique_ptr<TrackRow>, jd::kTracks> rows;
+    std::unique_ptr<Liner> liner;
 };
 
 //==============================================================================

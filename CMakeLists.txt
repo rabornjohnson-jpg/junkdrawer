@@ -19,6 +19,7 @@ juce_add_plugin(JunkDrawer
     PLUGIN_MANUFACTURER_CODE Frfa
     PLUGIN_CODE             Jdw1
     FORMATS                 VST3 Standalone
+    BUNDLE_ID               com.fadingfractalaudio.junkdrawer
     PRODUCT_NAME            "Junk Drawer"
     IS_SYNTH                FALSE
     NEEDS_MIDI_INPUT        FALSE
@@ -35,10 +36,12 @@ target_compile_definitions(JunkDrawer PUBLIC
     JUCE_USE_CURL=0
     JUCE_VST3_CAN_REPLACE_VST2=0
     JUCE_DISPLAY_SPLASH_SCREEN=0
-    JUCE_REPORT_APP_USAGE=0)
+    JUCE_REPORT_APP_USAGE=0
+    JUCE_USE_MP3AUDIOFORMAT=1)
 
 target_link_libraries(JunkDrawer
     PRIVATE juce::juce_audio_utils
+            juce::juce_dsp
             juce::juce_audio_formats
             JunkAssets
     PUBLIC  juce::juce_recommended_config_flags
@@ -56,8 +59,21 @@ if(JD_BUILD_TESTS)
     target_include_directories(JunkUiSnapshot PRIVATE JunkDrawer/Source)
     target_compile_definitions(JunkUiSnapshot PRIVATE
         JUCE_USE_CURL=0 JUCE_WEB_BROWSER=0 JUCE_STANDALONE_APPLICATION=1
-        JucePlugin_Build_Standalone=0 JUCE_MODAL_LOOPS_PERMITTED=1)
+        JucePlugin_Build_Standalone=0 JUCE_MODAL_LOOPS_PERMITTED=1 JUCE_USE_MP3AUDIOFORMAT=1)
     target_link_libraries(JunkUiSnapshot PRIVATE
-        juce::juce_audio_utils juce::juce_audio_formats JunkAssets
+        juce::juce_audio_utils juce::juce_audio_formats juce::juce_dsp JunkAssets
+        juce::juce_recommended_config_flags)
+
+    juce_add_console_app(JunkEngineTest PRODUCT_NAME "JunkEngineTest")
+    target_sources(JunkEngineTest PRIVATE
+        JunkDrawer/Tests/EngineTest.cpp
+        JunkDrawer/Source/PluginProcessor.cpp
+        JunkDrawer/Source/PluginEditor.cpp)
+    target_include_directories(JunkEngineTest PRIVATE JunkDrawer/Source)
+    target_compile_definitions(JunkEngineTest PRIVATE
+        JUCE_USE_CURL=0 JUCE_WEB_BROWSER=0 JUCE_STANDALONE_APPLICATION=1
+        JucePlugin_Build_Standalone=0 JUCE_MODAL_LOOPS_PERMITTED=1 JUCE_USE_MP3AUDIOFORMAT=1)
+    target_link_libraries(JunkEngineTest PRIVATE
+        juce::juce_audio_utils juce::juce_audio_formats juce::juce_dsp JunkAssets
         juce::juce_recommended_config_flags)
 endif()
