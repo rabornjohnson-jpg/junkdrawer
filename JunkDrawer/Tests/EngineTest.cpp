@@ -331,6 +331,26 @@ int main()
         setP (sq, "seq_run", 0.f);
     }
 
+    // loop conditions (the Region lane is 16 steps, so a pass is 96000 samples at 120 BPM)
+    {
+        auto restart = [&] { setP (sq, "seq_run", 0.f); run (sq, 0.1, rate); setP (sq, "seq_run", 1.f); };
+        onlySteps ({ 0 });
+        setP (sq, jd::trackId (0, "cond"), 1.f);                              // every 2nd loop
+        restart();
+        o = run (sq, 4.0, rate);
+        check (win (o, 100, 900) > 0.05f && win (o, 96100, 96900) < 1.0e-5f, "every 2nd loop plays the first pass and skips the second");
+        setP (sq, jd::trackId (0, "cond"), 4.f);                              // first loop only
+        restart();
+        o = run (sq, 4.0, rate);
+        check (win (o, 100, 900) > 0.05f && win (o, 96100, 96900) < 1.0e-5f, "first loop only skips the second pass");
+        setP (sq, jd::trackId (0, "cond"), 0.f);
+        restart();
+        o = run (sq, 4.0, rate);
+        check (win (o, 100, 900) > 0.05f && win (o, 96100, 96900) > 0.05f, "every loop plays every pass");
+        onlySteps ({ 0, 2 });
+        setP (sq, "seq_run", 0.f);
+    }
+
     // patterns and the chain
     {
         auto restart = [&] { setP (sq, "seq_run", 0.f); run (sq, 0.1, rate); setP (sq, "seq_run", 1.f); };

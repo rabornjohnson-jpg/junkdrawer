@@ -39,7 +39,7 @@ JunkDrawerProcessor::JunkDrawerProcessor()
         audition[(size_t) t] = 0; playing[(size_t) t] = 0; loadToken[(size_t) t] = 0;
         tp[(size_t) t] = { state.getRawParameterValue (jd::trackId (t, "mute")), state.getRawParameterValue (jd::trackId (t, "solo")),
                            state.getRawParameterValue (jd::trackId (t, "level")), state.getRawParameterValue (jd::trackId (t, "pan")),
-                           state.getRawParameterValue (jd::trackId (t, "tune")), state.getRawParameterValue (jd::trackId (t, "order")) };
+                           state.getRawParameterValue (jd::trackId (t, "tune")), state.getRawParameterValue (jd::trackId (t, "order")), state.getRawParameterValue (jd::trackId (t, "cond")) };
         for (int r = 0; r < jd::kRegions; ++r)
         {
             auto g = [&] (const char* s) { return state.getRawParameterValue (jd::regionId (t, r, s)); };
@@ -539,6 +539,16 @@ void JunkDrawerProcessor::applyStep (int t, SeqTrack& q, long long step, int pat
         if (mode == 1) q.region = 1 + (int) (step % count);
         else if (mode == 2) { const int per = 2 * (count - 1), k = (int) (step % per); q.region = 1 + (k < count ? k : per - k); }
         else if (mode == 3) q.region = 1 + juce::jmin (count - 1, (int) (jd::hash01 ((juce::uint32) (step * 69069LL + (long long) t * 1013LL + 5LL)) * (float) count));
+    }
+    if (q.region > 0)
+    {
+        // Plays: only on some passes through the pattern (a pass is one trip round the Region lane).
+        const int cond = juce::roundToInt (tp[(size_t) t].cond->load());
+        if (cond > 0)
+        {
+            const long long pass = step / juce::jmax (1, patLen (pat, t, jd::LaneRegion));
+            if (cond == 4 ? pass != 0 : pass % (cond + 1) != 0) q.region = 0;
+        }
     }
     q.vol = at (jd::LaneVolume);
     q.pitch = at (jd::LanePitch);

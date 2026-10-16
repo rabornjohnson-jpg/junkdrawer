@@ -1036,6 +1036,11 @@ struct Liner : juce::Component, juce::FileDragAndDropTarget
         const int curOrder = juce::roundToInt (proc.state.getRawParameterValue (jd::trackId (track, "order"))->load());
         for (int i = 0; i < 4; ++i) order.addItem (300 + i, orderNames[i], true, i == curOrder);
         m.addSubMenu ("Region order", order);
+        juce::PopupMenu cond;
+        static const char* condNames[] = { "Every loop", "Every 2nd loop", "Every 3rd loop", "Every 4th loop", "First loop only" };
+        const int curCond = juce::roundToInt (proc.state.getRawParameterValue (jd::trackId (track, "cond"))->load());
+        for (int i = 0; i < 5; ++i) cond.addItem (400 + i, condNames[i], true, i == curCond);
+        m.addSubMenu ("This track plays", cond);
         m.addSubMenu ("Edit pattern", edit);
         m.addSubMenu ("Copy this pattern to", copyTo);
         m.addItem (5, "Clear this pattern");
@@ -1047,6 +1052,7 @@ struct Liner : juce::Component, juce::FileDragAndDropTarget
             else if (r == 3) proc.humanizeLane (track, lane);
             else if (r == 4) proc.resetLane (track, lane);
             else if (r == 5) proc.clearPattern();
+            else if (r >= 400 && r < 405) setNorm (proc, jd::trackId (track, "cond"), (float) (r - 400));
             else if (r >= 300 && r < 304) setNorm (proc, jd::trackId (track, "order"), (float) (r - 300));
             else if (r >= 100 && r < 100 + jd::kPatterns) proc.setEditPattern (r - 100);
             else if (r >= 200 && r < 200 + jd::kPatterns) proc.copyPatternTo (r - 200);
