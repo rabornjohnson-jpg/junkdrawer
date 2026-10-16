@@ -116,14 +116,14 @@ Step-lane engine, LFO engine, file loading, DAW recording pipeline. Pull these i
 - Every control, including the ADSR knobs, takes an LFO.
 
 **Vocabulary (tooltips and empty states only)**
-- Presets are drawers, regions are objects, steps are compartments, LFOs are rubber bands. These words appear only in tooltips and empty states.
+- Presets are drawers, regions are objects, steps are compartments. These words appear only in tooltips and empty states. LFOs are just called LFOs.
 - Randomize is Rummage. Mutate is Shake the drawer. Record is Catch something.
 - Empty drawer: "Nothing in here yet. Drop something in."
 - Pattern saved: "Put it back where you found it."
 
 **Animation rules (keep it cheap)**
 - Animate transforms and opacity only.
-- Examples: drawers sliding, objects rattling on a ratchet, rubber bands wobbling when assigned, a soft glow on the active step, slow-drifting dust in the light.
+- Examples: drawers sliding, objects rattling on a ratchet, LFO tiles wobbling when assigned, a soft glow on the active step, slow-drifting dust in the light.
 - Cap at about 30 fps; redraw only what changed; keep audio and UI on separate threads; pause ambient animation when the window is hidden.
 - Include a Reduce Motion switch.
 

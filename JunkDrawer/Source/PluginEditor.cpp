@@ -80,7 +80,7 @@ struct JunkDrawerEditor::Header : juce::Component, juce::Timer
     Header (JunkDrawerEditor& e) : ed (e)
     {
         const char* names[] = { "Drawer", "LFOs", "Master", "Matrix" };
-        const char* tips[]  = { "The main drawer", "Rubber bands", "Master and effects", "Everything that is hooked up" };
+        const char* tips[]  = { "The main drawer", "The six LFOs", "Master and effects", "Everything that is hooked up" };
         for (int i = 0; i < NumPages; ++i)
         {
             auto& b = tabs[(size_t) i];
@@ -827,7 +827,7 @@ struct JunkDrawerEditor::DrawerPage : juce::Component, juce::ChangeListener
     {
         LfoTile (APVTS& s, int i) : index (i), state (s), wShape (s, jd::lfoId (i, "shape"), *this), wRate (s, jd::lfoId (i, "rate"), *this),
                                     wDiv (s, jd::lfoId (i, "div"), *this), wSync (s, jd::lfoId (i, "sync"), *this)
-        { setTooltip ("Rubber band " + juce::String (i + 1)); }
+        { setTooltip ("LFO " + juce::String (i + 1)); }
 
         void paint (juce::Graphics& g) override
         {
@@ -1056,7 +1056,7 @@ struct JunkDrawerEditor::LfoPage : juce::Component
         matrix.setButtonText ("Mod matrix");
         matrix.onClick = [this] { ed.showPage (Matrix); };
         clear.setButtonText ("Clear all");
-        clear.setTooltip ("Take every rubber band off");
+        clear.setTooltip ("Take every LFO off");
         clear.setEnabled (false);
         addAndMakeVisible (matrix); addAndMakeVisible (clear);
     }
