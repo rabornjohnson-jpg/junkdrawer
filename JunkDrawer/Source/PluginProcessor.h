@@ -66,6 +66,17 @@ public:
     float takeInputPeak() noexcept { return inPeak.exchange (0.f); }
     static juce::File recordingsFolder();
 
+    // Offline export support: an export runs a second processor of its own (see Exporter.h).
+    void importSettings (const juce::ValueTree& tree) { state.replaceState (tree); loadMods(); }
+    void setTrackAudio (int track, std::shared_ptr<const jd::TrackData> d)
+    {
+        const juce::SpinLock::ScopedLockType sl (slotLock);
+        slots[(size_t) track].data = std::move (d);
+    }
+    /** The tempo and bar length the sequencer last ran at (the host's when there is one), so an export can match what you hear. */
+    double lastBpm() const noexcept { return bpmSeen.load(); }
+    double lastBeatsPerBar() const noexcept { return barSeen.load(); }
+
     //==========================================================================
     // LFO assignments.  A link says "this LFO moves this control by this much"; many controls per LFO and many LFOs per control are fine.
     // Only continuous controls can be linked.  These run on the message thread.
@@ -130,6 +141,7 @@ private:
     int preLen = 0, prePos = 0, preFill = 0;
     juce::AudioBuffer<float> recPre;                                   // short ring kept while waiting for sound, so the first hit is not clipped
     double beatsPerBar = 4.0;
+    std::atomic<double> bpmSeen { 120.0 }, barSeen { 4.0 };
 
     // ---- modulation (audio thread unless noted) ----
     std::vector<jd::Assign> mods;                                      // message thread

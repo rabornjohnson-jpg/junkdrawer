@@ -1,6 +1,7 @@
 // Headless checks of the sample engine: loading, resampling, hit detection, regions, voices and mute/solo.
 // Usage: JunkEngineTest   (exit code 0 when every check passes)
 #include "PluginEditor.h"
+#include "Exporter.h"
 
 namespace
 {
@@ -542,6 +543,145 @@ int main()
         runBlocks (10, 0.5f, 440.f);
         proc.stopCatch (false); runBlocks (1, 0.5f, 440.f); pump (300);
         check (proc.getTrack (T) == nullptr && proc.catchState() == JunkDrawerProcessor::CatchIdle, "a discarded take leaves the track empty");
+    }
+
+    std::printf ("Export\n");
+    {
+        JunkDrawerProcessor ex;
+        ex.prepareToPlay (rate, 256);
+        setP (ex, "m_volume", 0.f);
+        fxOff (ex);
+        ex.loadFile (0, makeWav (44100.0, 2, 2.0, { 0.0, 0.5, 1.0, 1.5 }, "jd_test_export.wav"));
+        check (waitForTrack (ex, 0), "the export test has a sound to play");
+        auto tmp = juce::File::getSpecialLocation (juce::File::tempDirectory).getChildFile ("jd_export_test");
+        tmp.deleteRecursively();
+        std::atomic<float> prog { 0.f };
+        std::atomic<bool> cancel { false };
+        auto readBack = [&] (const juce::File& f, double& sr, int& ch, int& bits, juce::int64& len, float& peak)
+        {
+            juce::AudioFormatManager fm; fm.registerBasicFormats();
+            std::unique_ptr<juce::AudioFormatReader> r (fm.createReaderFor (f));
+            if (r == nullptr) return false;
+            sr = r->sampleRate; ch = (int) r->numChannels; bits = (int) r->bitsPerSample; len = r->lengthInSamples;
+            juce::AudioBuffer<float> b (2, (int) std::min<juce::int64> (len, 4000000));
+            r->read (&b, 0, b.getNumSamples(), 0, true, true);
+            peak = juce::jmax (b.getMagnitude (0, 0, b.getNumSamples()), b.getMagnitude (1, 0, b.getNumSamples()));
+            return true;
+        };
+        // one pass of the pattern: 16 steps of 1/16 at 120 BPM is 2 seconds
+        auto opt = [&] (const juce::String& sub)
+        {
+            jdx::ExportOptions o; o.folder = tmp.getChildFile (sub); o.passes = 1; o.rate = 48000.0; return o;
+        };
+        {
+            auto snap = jdx::takeSnapshot (ex);
+            check (std::abs (jdx::Exporter::passSeconds (*snap, jdx::Exporter::audibleTracks (*snap)) - 2.0) < 1e-6, "one pass is one run of the longest lane");
+            auto o = opt ("master");
+            auto res = jdx::Exporter::run (*snap, o, prog, cancel);
+            double sr; int ch, bits; juce::int64 len; float pk;
+            check (res.ok && res.files.size() == 1 && readBack (res.files[0], sr, ch, bits, len, pk), "a master export writes one readable file");
+            if (res.ok && readBack (res.files[0], sr, ch, bits, len, pk))
+            {
+                check (sr == 48000.0 && ch == 2 && bits == 24, "at the rate and depth that were asked for");
+                check (std::abs ((double) len - 2.0 * 48000.0) < 600.0, "and one pass long");
+                check (std::abs (juce::Decibels::gainToDecibels (pk) + 0.3f) < 0.3f, "Relative normalizing puts the peak at -0.3 dB");
+            }
+            o = opt ("off"); o.norm = jdx::NormMode::Off;
+            auto r2 = jdx::Exporter::run (*snap, o, prog, cancel);
+            const bool rb2 = r2.ok && readBack (r2.files[0], sr, ch, bits, len, pk);
+            std::printf ("   (off: ok=%d err=%s peak=%.4f)\n", (int) r2.ok, r2.error.toRawUTF8(), rb2 ? (double) pk : -1.0);
+            check (rb2 && pk > 0.01f && std::abs (juce::Decibels::gainToDecibels (pk) + 0.3f) > 0.1f, "with normalizing off the level is left as it plays");
+        }
+        {   // every file type, bit depth and rate reads back as asked
+            auto snap = jdx::takeSnapshot (ex);
+            int good = 0, total = 0;
+            for (int ft = 0; ft < 3; ++ft) for (int bd = 0; bd < 2; ++bd) for (int rt = 0; rt < 3; ++rt)
+            {
+                auto o = opt ("combo" + juce::String (ft) + juce::String (bd) + juce::String (rt));
+                o.file = (jdx::FileKind) ft; o.bits = bd == 0 ? 24 : 16; o.rate = rt == 0 ? 96000.0 : rt == 1 ? 48000.0 : 44100.0;
+                auto r = jdx::Exporter::run (*snap, o, prog, cancel);
+                double sr; int ch, bits; juce::int64 len; float pk;
+                ++total;
+                if (r.ok && readBack (r.files[0], sr, ch, bits, len, pk) && sr == o.rate && ch == 2 && bits == o.bits && std::abs ((double) len - 2.0 * o.rate) < 0.02 * o.rate && pk > 0.05f) ++good;
+            }
+            check (good == total && total == 18, "all 18 file type, bit depth and rate combinations read back correctly");
+        }
+        {   // lengths
+            auto snap = jdx::takeSnapshot (ex);
+            double sr; int ch, bits; juce::int64 len; float pk;
+            auto o = opt ("time"); o.lengthKind = jdx::LengthKind::Time; o.timeSeconds = 3.0;
+            auto r = jdx::Exporter::run (*snap, o, prog, cancel);
+            check (r.ok && readBack (r.files[0], sr, ch, bits, len, pk) && std::abs ((double) len - 3.0 * 48000.0) < 600.0, "a typed time sets the length");
+            o = opt ("bars"); o.lengthKind = jdx::LengthKind::Bars; o.bars = 2;
+            r = jdx::Exporter::run (*snap, o, prog, cancel);
+            check (r.ok && readBack (r.files[0], sr, ch, bits, len, pk) && std::abs ((double) len - 4.0 * 48000.0) < 600.0, "two bars at 120 BPM are four seconds");
+            jdx::ExportOptions big; big.lengthKind = jdx::LengthKind::Time; big.timeSeconds = 99999.0;
+            check (jdx::exportMainSeconds (big, 2.0, 120.0, 4.0) == 1800.0, "the length is capped at 30 minutes");
+        }
+        {   // endings
+            auto snap = jdx::takeSnapshot (ex);
+            double sr; int ch, bits; juce::int64 len; float pk;
+            auto o = opt ("fade"); o.lengthKind = jdx::LengthKind::Time; o.timeSeconds = 4.0; o.ending = jdx::EndingKind::Fade; o.endingSeconds = 2.0;
+            auto r = jdx::Exporter::run (*snap, o, prog, cancel);
+            bool quiet = false;
+            if (r.ok)
+            {
+                juce::AudioFormatManager fm; fm.registerBasicFormats();
+                std::unique_ptr<juce::AudioFormatReader> rd (fm.createReaderFor (r.files[0]));
+                juce::AudioBuffer<float> b (2, 200);
+                rd->read (&b, 0, 200, rd->lengthInSamples - 200, true, true);
+                quiet = b.getMagnitude (0, 200) < 0.002f;
+            }
+            check (r.ok && quiet, "a fade out reaches silence");
+            o = opt ("ring"); o.ending = jdx::EndingKind::RingOut; o.endingSeconds = 3.0;
+            r = jdx::Exporter::run (*snap, o, prog, cancel);
+            check (r.ok && readBack (r.files[0], sr, ch, bits, len, pk) && std::abs ((double) len - 5.0 * 48000.0) < 600.0, "a ring-out adds its time after the music");
+        }
+        {   // folders, space, stems, mute
+            auto snap = jdx::takeSnapshot (ex);
+            auto o = opt ("full"); o.freeBytesOverride = 1000;
+            auto r = jdx::Exporter::run (*snap, o, prog, cancel);
+            check (! r.ok && r.error.contains ("Not enough free disk space"), "an export refuses to start when the drive is too full");
+            ex.loadFile (1, makeWav (22050.0, 1, 1.0, { 0.1, 0.4 }, "jd_test_export2.wav"));
+            check (waitForTrack (ex, 1), "a second sound is loaded");
+            snap = jdx::takeSnapshot (ex);
+            o = opt ("stems"); o.mode = jdx::ExportMode::Stems;
+            r = jdx::Exporter::run (*snap, o, prog, cancel);
+            check (r.ok && r.files.size() == 2 && r.files[0].getFileName().contains ("Track1") && r.files[1].getFileName().contains ("Track2"), "stems write one file per track");
+            setP (ex, "t2_mute", 1.f);
+            snap = jdx::takeSnapshot (ex);
+            check (jdx::Exporter::audibleTracks (*snap).size() == 1, "a muted track is left out");
+            setP (ex, "t2_mute", 0.f);
+            // stems add up to the master mix (effects are off here, so the mix is a plain sum)
+            snap = jdx::takeSnapshot (ex);
+            o = opt ("sum_m"); o.norm = jdx::NormMode::Off; auto rm = jdx::Exporter::run (*snap, o, prog, cancel);
+            o = opt ("sum_s"); o.norm = jdx::NormMode::Off; o.mode = jdx::ExportMode::Stems; auto rs = jdx::Exporter::run (*snap, o, prog, cancel);
+            bool sums = rm.ok && rs.ok && rs.files.size() == 2;
+            if (sums)
+            {
+                juce::AudioFormatManager fm; fm.registerBasicFormats();
+                std::unique_ptr<juce::AudioFormatReader> a (fm.createReaderFor (rm.files[0])), b (fm.createReaderFor (rs.files[0])), c (fm.createReaderFor (rs.files[1]));
+                const int n = (int) std::min ({ (juce::int64) a->lengthInSamples, (juce::int64) b->lengthInSamples, (juce::int64) c->lengthInSamples });
+                juce::AudioBuffer<float> A (2, n), B (2, n), C (2, n);
+                a->read (&A, 0, n, 0, true, true); b->read (&B, 0, n, 0, true, true); c->read (&C, 0, n, 0, true, true);
+                float worst = 0.f;
+                for (int i = 0; i < n; ++i) worst = juce::jmax (worst, std::abs (A.getSample (0, i) - B.getSample (0, i) - C.getSample (0, i)));
+                sums = worst < 0.01f;
+            }
+            check (sums, "the stems add up to the master mix");
+        }
+        {   // remembered per computer
+            jdx::ExportOptions a; a.mode = jdx::ExportMode::Stems; a.file = jdx::FileKind::Flac; a.bits = 16; a.rate = 44100.0; a.passes = 8; a.norm = jdx::NormMode::Maximum;
+            a.ending = jdx::EndingKind::Fade; a.endingSeconds = 5.0;
+            jdx::ExportSettings::saveOptions (a);
+            jdx::ExportOptions b; jdx::ExportSettings::loadOptions (b);
+            check (b.mode == a.mode && b.file == a.file && b.bits == 16 && b.rate == 44100.0 && b.passes == 8 && b.norm == a.norm && b.ending == a.ending && b.endingSeconds == 5.0, "the export options are saved and restored");
+            jdx::ExportSettings st; st.mode = 2; st.folder = tmp; st.save();
+            check (jdx::ExportSettings::load().mode == 2 && jdx::ExportSettings::load().folder == tmp, "the chosen folder is saved and restored");
+            st.mode = 0; st.save();
+            jdx::ExportOptions def; jdx::ExportSettings::saveOptions (def);
+        }
+        tmp.deleteRecursively();
     }
 
     std::printf ("Rummage\n");

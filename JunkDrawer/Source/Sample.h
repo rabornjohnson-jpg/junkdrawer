@@ -56,6 +56,24 @@ inline std::shared_ptr<TrackData> loadTrackData (const juce::File& file, double 
     return td;
 }
 
+// The same sound at another sample rate (used by the exporter, which renders at the rate you pick).
+inline std::shared_ptr<TrackData> resampledCopy (const TrackData& src, double targetRate)
+{
+    auto td = std::make_shared<TrackData>();
+    td->path = src.path; td->name = src.name; td->truncated = src.truncated;
+    td->sampleRate = targetRate;
+    if (std::abs (src.sampleRate - targetRate) < 0.5) { td->audio = src.audio; td->sampleRate = src.sampleRate; return td; }
+    const double ratio = src.sampleRate / targetRate;
+    const int outLen = juce::jmax (1, (int) std::floor ((double) src.length() / ratio));
+    td->audio.setSize (2, outLen);
+    for (int ch = 0; ch < 2; ++ch)
+    {
+        juce::LagrangeInterpolator li;
+        li.process (ratio, src.audio.getReadPointer (ch), td->audio.getWritePointer (ch), outLen);
+    }
+    return td;
+}
+
 // Positions (0..1) of the strongest hits, in order.  A hit is a jump in short-term energy well above what came just before it.
 inline std::vector<float> detectOnsets (const juce::AudioBuffer<float>& a, double sr, int maxCount)
 {

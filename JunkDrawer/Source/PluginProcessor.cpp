@@ -285,6 +285,7 @@ void JunkDrawerProcessor::processBlock (juce::AudioBuffer<float>& buf, juce::Mid
         }
     if (! hostKnown) { running = pRun->load() > 0.5f; ppq0 = internalPpq; }
     if (ppq0 < 0.0) running = false;
+    bpmSeen.store (bpm, std::memory_order_relaxed); barSeen.store (beatsPerBar, std::memory_order_relaxed);
     const double dppq = bpm / (60.0 * hostRate);
     internalPpq = running ? internalPpq + dppq * n : 0.0;
     captureInput (buf, n, running, ppq0, dppq, bpm);              // the input is read here, then the buffer is cleared: nothing passes through
