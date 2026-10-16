@@ -90,7 +90,7 @@ Step-lane engine, LFO engine, file loading, DAW recording pipeline. Pull these i
 - Rummage (randomize with locked lanes) and Shake (mutate amount).
 - Copy/paste and humanize for lanes.
 
-### Stage 7b: Export (same selections and rules as DriftLooper, with this plug-in's look)
+### Stage 7b: Export (BUILT: window, first-time folder prompt, offline render; same selections and rules as DriftLooper, with this plug-in's look)
 - Export button at the top right of the header opens the Export window (mockup: Export window board).
 - WHAT: master stereo file, or one stem per track.
 - LENGTH three ways: PASSES (1-16 passes of the longest lane), TIME (minutes:seconds, up to 30 minutes) or BARS (follows tempo and time signature; the window shows the time it comes to). Cap 30 minutes of music per file.

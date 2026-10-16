@@ -13,6 +13,8 @@ public:
 
     enum Page { Drawer, Lfos, Master, Matrix, NumPages };
     void showPage (int page);
+    void openExport();                                      // the Export window
+    juce::Component& exportWindow() noexcept { return *exportOverlay; }      // used by the screenshot tool
     int  currentPage() const noexcept { return page; }
 
     static constexpr int kW = 1280, kH = 900;
@@ -35,6 +37,7 @@ private:
     std::unique_ptr<LfoPage> lfoPage;
     std::unique_ptr<MasterPage> masterPage;
     std::unique_ptr<MatrixPage> matrixPage;
+    std::unique_ptr<juce::Component> exportOverlay;
     juce::TooltipWindow tooltip { this, 600 };
     int page = 0;
 

@@ -1,4 +1,5 @@
 #include "PluginEditor.h"
+#include "Exporter.h"
 #include <BinaryData.h>
 #include <map>
 
@@ -155,6 +156,10 @@ struct JunkDrawerEditor::Header : juce::Component, juce::Timer, juce::ChangeList
         reduce.setTooltip ("Turns off the ambient animation");
         reduce.onClick = [this] { ed.proc.state.state.setProperty ("reduceMotion", reduce.getToggleState(), nullptr); };
         addAndMakeVisible (reduce);
+        exportBtn.setButtonText ("Export");
+        exportBtn.setTooltip ("Play the pattern offline into audio files");
+        exportBtn.onClick = [this] { ed.openExport(); };
+        addAndMakeVisible (exportBtn);
         startTimerHz (4);
     }
 
@@ -167,6 +172,7 @@ struct JunkDrawerEditor::Header : juce::Component, juce::Timer, juce::ChangeList
         int x = 312;
         for (auto& b : tabs) { b.setBounds (x, 12, 70, 28); x += 76; }
         reduce.setBounds (getWidth() - 24 - 110, 12, 110, 28);
+        exportBtn.setBounds (928, 12, 70, 28);
     }
 
     void timerCallback() override
@@ -186,7 +192,7 @@ struct JunkDrawerEditor::Header : juce::Component, juce::Timer, juce::ChangeList
         drawText (g, "FADING FRACTAL AUDIO", { 94, 6, 220, 14 }, sans (11.f, true).withExtraKerningFactor (0.12f), juce::Colour (0xffd7c196));
         drawText (g, "Junk Drawer", { 94, 18, 220, 30 }, serif (25.f), juce::Colour (0xfff6e8c9));
 
-        const juce::Rectangle<float> bar (660.f, 11.f, 320.f, 30.f);
+        const juce::Rectangle<float> bar (648.f, 11.f, 268.f, 30.f);
         g.setColour (juce::Colour (0x52000000));
         g.fillRoundedRectangle (bar, 15.f);
         g.setColour (juce::Colour (0x80d6ac5c));
@@ -207,7 +213,7 @@ struct JunkDrawerEditor::Header : juce::Component, juce::Timer, juce::ChangeList
 
     JunkDrawerEditor& ed;
     std::array<juce::TextButton, NumPages> tabs;
-    juce::TextButton reduce;
+    juce::TextButton reduce, exportBtn;
     double bpm = 0.0;
 };
 
@@ -1829,6 +1835,339 @@ struct JunkDrawerEditor::MatrixPage : juce::Component, juce::ChangeListener
 };
 
 //==============================================================================
+//==============================================================================
+// Export window: a dim sheet over the whole editor with the options card, and the first-time folder prompt.
+namespace
+{
+struct ExportPanel : juce::Component, juce::Timer
+{
+    explicit ExportPanel (JunkDrawerProcessor& p)
+        : proc (p), what ({ "Master mix", "One file per track" }), lenKind ({ "Passes", "Time", "Bars" }), fileKind ({ "WAV", "AIFF", "FLAC" }), bits ({ "24-bit", "16-bit, dithered" }),
+          rate ({ "96 kHz", "48 kHz", "44.1 kHz" }), ending ({ "Cut", "Fade 2 s", "Fade 5 s", "Fade 10 s", "Ring 3 s", "Ring 8 s" }), norm ({ "Off", "Relative", "Maximum" })
+    {
+        setInterceptsMouseClicks (true, true);
+        what.setTooltip ("The whole mix in one file, or one file for each track that plays");
+        lenKind.setTooltip ("Ask for the length in passes of the longest lane, in minutes and seconds, or in bars");
+        fileKind.setTooltip ("WAV, AIFF or FLAC");
+        bits.setTooltip ("16-bit files are dithered");
+        rate.setTooltip ("Sample rate of the files");
+        ending.setTooltip ("Cut stops at the end. Fade lowers the level inside the length. Ring out stops the pattern and lets Delay and Reverb tails finish after the length.");
+        norm.setTooltip ("Off leaves the level as it plays. Relative raises everything together until the loudest file peaks at -0.3 dB. Maximum does that to each file.");
+        for (auto* c : std::initializer_list<juce::Component*> { &what, &lenKind, &fileKind, &bits, &rate, &ending, &norm }) addAndMakeVisible (*c);
+        for (auto* c : std::initializer_list<PickSeg*> { &what, &lenKind, &fileKind, &bits, &rate, &ending, &norm }) c->onChange = [this] { readControls(); updateInfo(); };
+
+        field.setJustification (juce::Justification::centred);
+        field.setFont (mono (13.f, true));
+        field.setColour (juce::TextEditor::backgroundColourId, juce::Colour (0xfffffaf0));
+        field.setColour (juce::TextEditor::textColourId, juce::Colour (0xff2a1b10));
+        field.setColour (juce::TextEditor::outlineColourId, juce::Colour (0x00000000));
+        field.setColour (juce::TextEditor::focusedOutlineColourId, pal::amber);
+        field.setColour (juce::TextEditor::highlightColourId, pal::amber.withAlpha (0.5f));
+        field.setColour (juce::CaretComponent::caretColourId, juce::Colour (0xff2a1b10));
+        field.setInputRestrictions (8, "0123456789:.");
+        field.onTextChange = [this] { readControls(); updateInfo(); };
+        field.onReturnKey = [this] { field.giveAwayKeyboardFocus(); };
+        addAndMakeVisible (field);
+
+        folderBtn.setButtonText ("Change..."); folderBtn.onClick = [this] { showFolderMenu(); };
+        cancel.setButtonText ("Cancel");       cancel.onClick = [this] { if (running()) job->cancel.store (true); else close(); };
+        go.setButtonText ("Export");           go.setToggleState (true, juce::dontSendNotification); go.onClick = [this] { if (done) reveal(); else begin(); };
+        for (auto* b : { &folderBtn, &cancel, &go }) addAndMakeVisible (*b);
+
+        prompt.pick.setButtonText ("Choose a folder...");
+        prompt.pick.setToggleState (true, juce::dontSendNotification);
+        prompt.automatic.setButtonText ("Auto-assign (temporary folder)");
+        prompt.pick.onClick = [this] { chooseFolder (true); };
+        prompt.automatic.onClick = [this] { settings.mode = 1; settings.save(); prompt.setVisible (false); updateInfo(); begin(); };
+        addChildComponent (prompt);
+        setVisible (false);
+    }
+    ~ExportPanel() override { stopTimer(); }
+
+    bool running() const { return job != nullptr && ! job->finished.load(); }
+
+    void open()
+    {
+        if (running()) { setVisible (true); toFront (false); return; }
+        settings = jdx::ExportSettings::load();
+        jdx::ExportSettings::loadOptions (opt);
+        snap = jdx::takeSnapshot (proc);
+        job.reset(); done = false; status = {}; statusOk = true; prompt.setVisible (false);
+        syncControls();
+        setVisible (true); toFront (true);
+        updateInfo();
+        resized();
+    }
+    void close() { stopTimer(); prompt.setVisible (false); setVisible (false); }
+
+    //---- options <-> controls
+    void syncControls()
+    {
+        what.setSelected (opt.mode == jdx::ExportMode::Stems ? 1 : 0);
+        lenKind.setSelected ((int) opt.lengthKind);
+        fileKind.setSelected ((int) opt.file);
+        bits.setSelected (opt.bits == 16 ? 1 : 0);
+        rate.setSelected (opt.rate >= 96000.0 ? 0 : opt.rate >= 48000.0 ? 1 : 2);
+        int e = 0;
+        if (opt.ending == jdx::EndingKind::Fade) e = opt.endingSeconds >= 10.0 ? 3 : opt.endingSeconds >= 5.0 ? 2 : 1;
+        else if (opt.ending == jdx::EndingKind::RingOut) e = opt.endingSeconds >= 8.0 ? 5 : 4;
+        ending.setSelected (e);
+        norm.setSelected ((int) opt.norm);
+        showLengthText();
+    }
+    void showLengthText()
+    {
+        switch (opt.lengthKind)
+        {
+            case jdx::LengthKind::Passes: field.setText (juce::String (opt.passes), false); break;
+            case jdx::LengthKind::Bars:   field.setText (juce::String (opt.bars), false); break;
+            default:                      field.setText (clock (opt.timeSeconds), false); break;
+        }
+    }
+    static juce::String clock (double s) { const int m = (int) (s / 60.0), r = (int) std::round (s - m * 60.0); return juce::String (m) + ":" + juce::String (r).paddedLeft ('0', 2); }
+    static double parseClock (const juce::String& t)
+    {
+        const int c = t.indexOfChar (':');
+        if (c < 0) return t.getDoubleValue();
+        return t.substring (0, c).getIntValue() * 60.0 + t.substring (c + 1).getDoubleValue();
+    }
+    void readControls()
+    {
+        opt.mode = what.selected() == 1 ? jdx::ExportMode::Stems : jdx::ExportMode::Master;
+        const auto before = opt.lengthKind;
+        opt.lengthKind = (jdx::LengthKind) lenKind.selected();
+        if (opt.lengthKind != before) showLengthText();
+        else
+        {
+            const auto t = field.getText();
+            if (opt.lengthKind == jdx::LengthKind::Passes) opt.passes = juce::jlimit (1, 16, t.getIntValue());
+            else if (opt.lengthKind == jdx::LengthKind::Bars) opt.bars = juce::jlimit (1, 999, t.getIntValue());
+            else opt.timeSeconds = juce::jlimit (1.0, jdx::kMaxExportSeconds, parseClock (t));
+        }
+        opt.file = (jdx::FileKind) fileKind.selected();
+        opt.bits = bits.selected() == 1 ? 16 : 24;
+        opt.rate = rate.selected() == 0 ? 96000.0 : rate.selected() == 1 ? 48000.0 : 44100.0;
+        static const double sec[] = { 0.0, 2.0, 5.0, 10.0, 3.0, 8.0 };
+        const int e = ending.selected();
+        opt.ending = e == 0 ? jdx::EndingKind::Cut : e <= 3 ? jdx::EndingKind::Fade : jdx::EndingKind::RingOut;
+        opt.endingSeconds = sec[e];
+        opt.norm = (jdx::NormMode) norm.selected();
+    }
+
+    void updateInfo()
+    {
+        info = {};
+        lengthNote = {};
+        canExport = false;
+        if (snap == nullptr) return;
+        const auto audible = jdx::Exporter::audibleTracks (*snap);
+        if (audible.empty()) { info = "Nothing to export yet. Load a sound into a track first."; repaint(); return; }
+        const double pass = jdx::Exporter::passSeconds (*snap, audible);
+        const double main = jdx::exportMainSeconds (opt, pass, snap->bpm, snap->beatsPerBar);
+        const double total = main + jdx::exportTailSeconds (opt);
+        const int files = opt.mode == jdx::ExportMode::Stems ? (int) audible.size() : 1;
+        const double bytes = jdx::exportBytesPerFile (opt, total);
+        const juce::String each = juce::File::descriptionOfSizeInBytes ((juce::int64) bytes);
+        info = juce::String (files) + (files == 1 ? " file" : " files") + ", about " + each + (files == 1 ? "" : " each")
+             + (opt.file == jdx::FileKind::Flac ? " (FLAC size is an estimate)" : "") + ".";
+        const juce::String len = main < 10.0 ? juce::String (main, 1) + " s" : clock (main);
+        lengthNote = opt.lengthKind == jdx::LengthKind::Passes ? (opt.passes == 1 ? "pass (1-16)" : "passes (1-16)") + juce::String (" ") + juce::String::charToString (0x00b7) + " " + len + " long"
+                   : opt.lengthKind == jdx::LengthKind::Bars   ? (opt.bars == 1 ? "bar" : "bars") + juce::String (" at ") + juce::String (snap->bpm, 0) + " BPM " + juce::String::charToString (0x00b7) + " " + len + " long"
+                                                               : "minutes:seconds (up to 30:00)";
+        canExport = true;
+        repaint();
+    }
+
+    //---- folder
+    juce::String folderLabel() const
+    {
+        return settings.mode == 2 ? settings.folder.getFullPathName()
+             : settings.mode == 1 ? juce::String ("Automatic - temporary folder (your system clears it)")
+                                  : juce::String ("Not chosen yet");
+    }
+    void showFolderMenu()
+    {
+        juce::PopupMenu m;
+        m.addItem (1, "Choose a folder...");
+        m.addItem (2, "Auto-assign (temporary folder)", true, settings.mode == 1);
+        m.addSeparator();
+        m.addItem (3, "Show the current folder", settings.root().isDirectory());
+        juce::Component::SafePointer<ExportPanel> self (this);
+        m.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&folderBtn), [self] (int r)
+        {
+            if (self == nullptr) return;
+            if (r == 1) self->chooseFolder (false);
+            else if (r == 2) { self->settings.mode = 1; self->settings.save(); self->repaint(); }
+            else if (r == 3) self->settings.root().revealToUser();
+        });
+    }
+    void chooseFolder (bool thenExport)
+    {
+        auto start = settings.mode == 2 && settings.folder.isDirectory() ? settings.folder : juce::File::getSpecialLocation (juce::File::userDocumentsDirectory);
+        chooser = std::make_unique<juce::FileChooser> ("Choose the folder Junk Drawer exports go into", start);
+        juce::Component::SafePointer<ExportPanel> self (this);
+        chooser->launchAsync (juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectDirectories, [self, thenExport] (const juce::FileChooser& fc)
+        {
+            if (self == nullptr) return;
+            const auto dir = fc.getResult();
+            if (dir == juce::File() || ! dir.isDirectory()) return;
+            self->settings.mode = 2; self->settings.folder = dir; self->settings.save();
+            self->prompt.setVisible (false);
+            self->repaint();
+            if (thenExport) self->begin();
+        });
+    }
+    void reveal() { if (lastFolder.isDirectory()) lastFolder.revealToUser(); }
+
+    //---- running
+    void begin()
+    {
+        if (running() || ! canExport) return;
+        settings = jdx::ExportSettings::load();
+        if (settings.mode == 0) { prompt.setVisible (true); prompt.toFront (false); resized(); repaint(); return; }
+        auto root = settings.root();
+        if (settings.mode == 2 && ! root.isDirectory() && ! root.createDirectory().wasOk())
+        {
+            status = "The export folder is not available (" + root.getFullPathName() + ") - please choose another.";
+            statusOk = false;
+            repaint();
+            chooseFolder (false);
+            return;
+        }
+        jdx::ExportSettings::saveOptions (opt);
+        auto o = opt;
+        o.folder = root.getChildFile ("Junk Drawer Export " + juce::Time::getCurrentTime().formatted ("%Y-%m-%d %H-%M-%S"));
+        lastFolder = o.folder;
+        status = {}; statusOk = true; done = false;
+        snap = jdx::takeSnapshot (proc);
+        juce::Component::SafePointer<ExportPanel> self (this);
+        job = std::make_unique<jdx::ExportThread> (jdx::takeSnapshot (proc), o, [self] (jdx::ExportResult r) { if (self != nullptr) self->finished (r); });
+        job->startThread();
+        startTimerHz (15);
+        setBusy (true);
+    }
+    void finished (const jdx::ExportResult& r)
+    {
+        stopTimer();
+        done = r.ok;
+        statusOk = r.ok;
+        status = r.ok ? "Done. " + juce::String (r.files.size()) + (r.files.size() == 1 ? " file, " : " files, ") + juce::File::descriptionOfSizeInBytes (r.bytes) + "." : r.error;
+        setBusy (false);
+        resized(); repaint();
+    }
+    void setBusy (bool b)
+    {
+        for (auto* c : std::initializer_list<juce::Component*> { &what, &lenKind, &fileKind, &bits, &rate, &ending, &norm, &field, &folderBtn }) c->setEnabled (! b);
+        go.setEnabled (! b);
+        cancel.setButtonText (b ? "Stop" : (done ? "Close" : "Cancel"));
+        go.setButtonText (done ? "Show in folder" : "Export");
+        resized(); repaint();
+    }
+    void timerCallback() override { repaint (cardArea()); }
+
+    //---- layout and painting
+    juce::Rectangle<int> cardArea() const { return { (getWidth() - 640) / 2, 130, 640, 456 }; }
+
+    void resized() override
+    {
+        const auto c = cardArea();
+        const int cx = c.getX() + 28 + 112, w = 640 - 56 - 112;
+        int y = c.getY() + 84;
+        auto place = [&] (juce::Component& k, int yy, int ww = -1) { k.setBounds (cx, yy + 5, ww < 0 ? w : ww, 26); };
+        place (what, y);
+        place (lenKind, y + 36, 190);
+        field.setBounds (cx + 200, y + 36 + 5, 70, 26);
+        place (fileKind, y + 72); place (bits, y + 108); place (rate, y + 144); place (ending, y + 180); place (norm, y + 216);
+        folderBtn.setBounds (cx + w - 86, y + 252 + 7, 86, 26);
+        const int by = c.getBottom() - 22 - 32;
+        go.setBounds (c.getRight() - 28 - 140, by, 140, 32);
+        cancel.setBounds (c.getRight() - 28 - 140 - 8 - 92, by, 92, 32);
+        prompt.setBounds ((getWidth() - 520) / 2, 300, 520, 176);
+    }
+
+    void paint (juce::Graphics& g) override
+    {
+        g.fillAll (juce::Colour (0x9e0a0603));
+        const auto c = cardArea();
+        const auto ink = juce::Colour (0xff2a1b10), sub = juce::Colour (0xff5a4329);
+        g.setColour (juce::Colour (0x99000000)); g.fillRoundedRectangle (c.toFloat().translated (0.f, 8.f).expanded (2.f), 8.f);
+        g.setColour (juce::Colour (0xfff3ead0)); g.fillRoundedRectangle (c.toFloat(), 6.f);
+        g.setColour (juce::Colour (0x665a3c1e)); g.drawRoundedRectangle (c.toFloat().reduced (0.5f), 6.f, 1.f);
+        drawText (g, "Export", { c.getX() + 28, c.getY() + 20, 400, 32 }, serif (26.f, false), ink);
+        drawText (g, "Plays the pattern offline, with the LFOs and effects moving the whole way.", { c.getX() + 28, c.getY() + 54, 584, 18 }, sans (12.f), sub);
+
+        static const char* labels[] = { "WHAT", "LENGTH", "FILE TYPE", "BIT DEPTH", "SAMPLE RATE", "ENDING", "NORMALIZE", "FOLDER" };
+        for (int i = 0; i < 8; ++i)
+            drawText (g, labels[i], { c.getX() + 28, c.getY() + 84 + i * 36 + 5, 108, 26 }, sans (11.f, true).withExtraKerningFactor (0.14f), sub);
+
+        g.setColour (juce::Colour (0xf0241710));
+        for (auto* k : std::initializer_list<juce::Component*> { &what, &lenKind, &fileKind, &bits, &rate, &ending, &norm, &folderBtn, &cancel })
+            g.fillRoundedRectangle (k->getBounds().toFloat(), 4.f);
+        g.setColour (juce::Colour (0xfffffaf0)); g.fillRoundedRectangle (field.getBounds().toFloat(), 4.f);
+
+        drawText (g, lengthNote, { field.getRight() + 10, field.getY(), 472 - 280, 26 }, sans (12.f), sub);
+
+        const int cx = c.getX() + 28 + 112, fy = c.getY() + 84 + 7 * 36 + 7;
+        g.setColour (juce::Colour (0xffe6dab6)); g.fillRoundedRectangle ((float) cx, (float) fy, 472.f - 96.f, 26.f, 4.f);
+        drawText (g, folderLabel(), { cx + 10, fy, 472 - 96 - 20, 26 }, mono (11.f), ink);
+
+        g.setColour (juce::Colour (0x40281608)); g.fillRect (c.getX() + 28, c.getBottom() - 22 - 32 - 14, 584, 1);
+        const int by = c.getBottom() - 22 - 32;
+        if (running())
+        {
+            const juce::Rectangle<float> bar ((float) c.getX() + 28.f, (float) by + 11.f, 340.f, 10.f);
+            g.setColour (juce::Colour (0xff3a2415)); g.fillRoundedRectangle (bar, 5.f);
+            g.setColour (pal::amber); g.fillRoundedRectangle (bar.withWidth (juce::jmax (10.f, bar.getWidth() * job->progress.load())), 5.f);
+            drawText (g, juce::String (juce::roundToInt (job->progress.load() * 100.f)) + "%", { c.getX() + 28 + 350, by, 60, 32 }, mono (12.f, true), ink);
+        }
+        else if (status.isNotEmpty())
+            drawText (g, status, { c.getX() + 28, by - 4, 340, 40 }, sans (12.f, true), statusOk ? juce::Colour (0xff3d5a22) : juce::Colour (0xff7a2e16), juce::Justification::centredLeft);
+        else
+        {
+            drawText (g, info, { c.getX() + 28, by - 2, 340, 18 }, sans (12.f), sub);
+            drawText (g, "Each export gets its own dated folder.", { c.getX() + 28, by + 16, 340, 18 }, sans (12.f), sub);
+        }
+        go.setEnabled (canExport && ! running());
+        if (! go.isEnabled() && ! done) { g.setColour (juce::Colour (0x66f3ead0)); }
+    }
+
+    struct Prompt : juce::Component
+    {
+        Prompt() { addAndMakeVisible (pick); addAndMakeVisible (automatic); }
+        void paint (juce::Graphics& g) override
+        {
+            const auto r = getLocalBounds().toFloat();
+            g.setColour (juce::Colour (0xcc000000)); g.fillRoundedRectangle (r.translated (0.f, 8.f), 6.f);
+            g.setColour (juce::Colour (0xfff3ead0)); g.fillRoundedRectangle (r, 6.f);
+            g.setColour (pal::brass); g.drawRoundedRectangle (r.reduced (1.f), 6.f, 2.f);
+            drawText (g, "Where should exports go?", { 26, 20, getWidth() - 52, 30 }, serif (22.f, false), juce::Colour (0xff2a1b10));
+            g.setFont (sans (13.f)); g.setColour (juce::Colour (0xff4a3320));
+            g.drawFittedText ("Pick a folder of your own, or let Junk Drawer save to a temporary folder. Each export gets its own dated sub-folder. You can change this any time with Change... in the Export window.",
+                              juce::Rectangle<int> (26, 54, getWidth() - 52, 60), juce::Justification::topLeft, 3);
+            g.setColour (juce::Colour (0xf0241710));
+            g.fillRoundedRectangle (pick.getBounds().toFloat(), 4.f); g.fillRoundedRectangle (automatic.getBounds().toFloat(), 4.f);
+        }
+        void resized() override { pick.setBounds (26, getHeight() - 26 - 36, 200, 36); automatic.setBounds (236, getHeight() - 26 - 36, getWidth() - 236 - 26, 36); }
+        juce::TextButton pick, automatic;
+    };
+
+    void mouseDown (const juce::MouseEvent&) override {}                  // the sheet swallows clicks meant for the page below
+    JunkDrawerProcessor& proc;
+    jdx::ExportOptions opt;
+    jdx::ExportSettings settings;
+    std::unique_ptr<jdx::ExportSnapshot> snap;
+    std::unique_ptr<jdx::ExportThread> job;
+    ui::PickSeg what, lenKind, fileKind, bits, rate, ending, norm;
+    juce::TextEditor field;
+    juce::TextButton folderBtn, cancel, go;
+    Prompt prompt;
+    std::unique_ptr<juce::FileChooser> chooser;
+    juce::File lastFolder;
+    juce::String info, lengthNote, status;
+    bool canExport = false, done = false, statusOk = true;
+};
+} // namespace
+
 JunkDrawerEditor::JunkDrawerEditor (JunkDrawerProcessor& p) : AudioProcessorEditor (&p), proc (p)
 {
     setLookAndFeel (&lnf);
@@ -1843,12 +2182,16 @@ JunkDrawerEditor::JunkDrawerEditor (JunkDrawerProcessor& p) : AudioProcessorEdit
     lfoPage = std::make_unique<LfoPage> (*this);
     masterPage = std::make_unique<MasterPage> (*this);
     matrixPage = std::make_unique<MatrixPage> (*this);
+    exportOverlay = std::make_unique<ExportPanel> (proc);
     addAndMakeVisible (*header);
     for (juce::Component* c : { (juce::Component*) drawerPage.get(), (juce::Component*) lfoPage.get(), (juce::Component*) masterPage.get(), (juce::Component*) matrixPage.get() })
         addChildComponent (c);
+    addChildComponent (*exportOverlay);
     showPage (Drawer);
     resized();
 }
+
+void JunkDrawerEditor::openExport() { static_cast<ExportPanel&> (*exportOverlay).open(); }
 
 JunkDrawerEditor::~JunkDrawerEditor()
 {
@@ -1902,4 +2245,5 @@ void JunkDrawerEditor::resized()
     header->setBounds (0, 0, kW, 52);
     for (juce::Component* c : { (juce::Component*) drawerPage.get(), (juce::Component*) lfoPage.get(), (juce::Component*) masterPage.get(), (juce::Component*) matrixPage.get() })
         c->setBounds (0, 52, kW, kH - 52);
+    if (exportOverlay != nullptr) exportOverlay->setBounds (getLocalBounds());
 }

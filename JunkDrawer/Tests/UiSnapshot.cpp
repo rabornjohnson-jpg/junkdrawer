@@ -1,12 +1,13 @@
 // Renders every page to PNG and checks the layout: controls inside their panels, no two controls overlapping.
 // Usage:  JunkUiSnapshot <output folder>     (under xvfb-run on a machine without a display)
 #include "PluginEditor.h"
+#include "Exporter.h"
 
 namespace
 {
 bool isLeaf (juce::Component* c)
 {
-    return dynamic_cast<ui::Knob*> (c) || dynamic_cast<ui::Seg*> (c) || dynamic_cast<juce::Button*> (c);
+    return dynamic_cast<ui::Knob*> (c) || dynamic_cast<ui::Seg*> (c) || dynamic_cast<ui::PickSeg*> (c) || dynamic_cast<juce::Button*> (c);
 }
 
 void collect (juce::Component* c, std::vector<juce::Component*>& out)
@@ -193,6 +194,51 @@ int main (int argc, char** argv)
         proc.stopCatch (false);
         proc.processBlock (rb, midi);
         for (int i = 0; i < 6; ++i) juce::MessageManager::getInstance()->runDispatchLoopUntil (60);
+    }
+    // the Export window, with a folder chosen, and then the first-time folder prompt
+    {
+        auto shot = [&] (const char* name)
+        {
+            for (int i = 0; i < 6; ++i) juce::MessageManager::getInstance()->runDispatchLoopUntil (40);
+            auto img = editor->createComponentSnapshot (editor->getLocalBounds(), true, 1.0f);
+            juce::PNGImageFormat png;
+            auto f = out.getChildFile (name);
+            f.deleteFile();
+            juce::FileOutputStream fs (f);
+            png.writeImageToStream (img, fs);
+        };
+        jdx::ExportSettings st; st.mode = 2; st.folder = juce::File ("/home/ray/Music/Junk Drawer exports"); st.save();
+        editor->showPage (0);
+        editor->openExport();
+        shot ("export.png");
+        problems += checkLayout (editor->exportWindow(), "export");
+
+        st.mode = 0; st.save();
+        editor->openExport();
+        std::function<juce::TextButton*(juce::Component&)> findGo = [&] (juce::Component& c) -> juce::TextButton*
+        {
+            for (auto* ch : c.getChildren())
+            {
+                if (auto* b = dynamic_cast<juce::TextButton*> (ch)) if (b->getButtonText() == "Export" && b->isVisible()) return b;
+                if (auto* f = findGo (*ch)) return f;
+            }
+            return nullptr;
+        };
+        if (auto* b = findGo (editor->exportWindow())) b->triggerClick();
+        shot ("export_first.png");
+        // (the prompt sits on top of the options card on purpose, so the overlap check is not run for it)
+        // a real export through the window: automatic folder, one click, wait for the files
+        st.mode = 1; st.save();
+        editor->openExport();
+        if (auto* b = findGo (editor->exportWindow())) b->triggerClick();
+        for (int i = 0; i < 400; ++i) { juce::MessageManager::getInstance()->runDispatchLoopUntil (50); if (findGo (editor->exportWindow()) == nullptr) break; }
+        shot ("export_done.png");
+        auto tmpRoot = juce::File::getSpecialLocation (juce::File::tempDirectory);
+        int made = 0;
+        for (auto& d : tmpRoot.findChildFiles (juce::File::findDirectories, false, "Junk Drawer Export *"))
+        { for (auto& f : d.findChildFiles (juce::File::findFiles, false, "*.wav")) { ++made; std::printf ("export wrote %s (%lld bytes)\n", f.getFileName().toRawUTF8(), (long long) f.getSize()); } d.deleteRecursively(); }
+        if (made == 0) { std::printf ("export through the window wrote nothing\n"); ++problems; }
+        jdx::ExportSettings none; none.save();
     }
     std::printf ("layout problems: %d\n", problems);
     ed.reset();
