@@ -153,7 +153,7 @@ struct JunkDrawerEditor::Header : juce::Component, juce::Timer, juce::ChangeList
         reduce.setButtonText ("Reduce motion");
         reduce.setClickingTogglesState (true);
         reduce.setToggleState ((bool) ed.proc.state.state.getProperty ("reduceMotion", false), juce::dontSendNotification);
-        reduce.setTooltip ("Turns off the ambient animation");
+        reduce.setTooltip ("Turns off the fading glow on the playing step");
         reduce.onClick = [this] { ed.proc.state.state.setProperty ("reduceMotion", reduce.getToggleState(), nullptr); };
         addAndMakeVisible (reduce);
         exportBtn.setButtonText ("Export");
@@ -545,8 +545,21 @@ struct StepGrid : juce::Component, juce::Timer, juce::SettableTooltipClient
         mix (plainValue (proc, jd::trackId (track, "regions")));
         for (int s = 0; s < jd::kSteps; ++s) { mix (plainValue (proc, jd::stepId (track, s, lane))); mix (plainValue (proc, jd::stepId (track, s, jd::LaneVolume))); }
         mix ((float) (currentIndex (lane) * 7 + currentIndex (jd::LaneVolume)));
+        // The step that just played fades out over about a sixth of a second.  With Reduce motion on it just switches off.
+        const bool still = (bool) proc.state.state.getProperty ("reduceMotion", false);
+        const int cur = currentIndex (lane);
+        bool fading = false;
+        for (int i = 0; i < jd::kSteps; ++i)
+        {
+            const float before = glow[(size_t) i];
+            glow[(size_t) i] = i == cur ? 1.f : (still ? 0.f : juce::jmax (0.f, before - 0.2f));
+            fading = fading || glow[(size_t) i] != before;
+        }
         if (h != sig) { sig = h; repaint(); if (onChanged) onChanged(); }
+        else if (fading) repaint();
     }
+
+    std::array<float, jd::kSteps> glow {};
 
     int currentIndex (int ln) const
     {
@@ -581,6 +594,7 @@ struct StepGrid : juce::Component, juce::Timer, juce::SettableTooltipClient
             const float v = plainValue (proc, jd::stepId (track, i, lane));
             if (on) paintValue (g, c, v, count);
             drawText (g, juce::String (i + 1), { (int) c.getX(), (int) c.getBottom() - 15, (int) c.getWidth(), 14 }, mono (11.f), juce::Colour (0xffcdb589).withAlpha (on ? 1.f : 0.45f), juce::Justification::centred);
+            if (glow[(size_t) i] > 0.f) { g.setColour (pal::amber.withAlpha (0.22f * glow[(size_t) i])); g.fillRoundedRectangle (c, 3.f); }
             if (i == cur) { g.setColour (pal::amber); g.drawRoundedRectangle (c.reduced (0.5f), 3.f, 2.f); }
         }
 
