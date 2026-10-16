@@ -12,7 +12,10 @@ FetchContent_Declare(JUCE
     GIT_SHALLOW    ON)
 FetchContent_MakeAvailable(JUCE)
 
-juce_add_binary_data(JunkAssets SOURCES JunkDrawer/Assets/ffa_mark.png)
+juce_add_binary_data(JunkAssets SOURCES JunkDrawer/Assets/ffa_mark.png
+        JunkDrawer/Assets/fonts/PlexSans-Regular.ttf JunkDrawer/Assets/fonts/PlexSans-SemiBold.ttf
+        JunkDrawer/Assets/fonts/PlexMono-Regular.ttf JunkDrawer/Assets/fonts/PlexMono-Medium.ttf
+        JunkDrawer/Assets/fonts/Fraunces-Medium.ttf JunkDrawer/Assets/fonts/SpecialElite-Regular.ttf)
 
 juce_add_plugin(JunkDrawer
     COMPANY_NAME            "Fading Fractal Audio"

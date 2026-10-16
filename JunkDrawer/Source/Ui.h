@@ -1,6 +1,7 @@
 #pragma once
 #include <juce_audio_processors/juce_audio_processors.h>
 #include <juce_gui_basics/juce_gui_basics.h>
+#include <BinaryData.h>
 
 // Shared look and small widgets.  Rules: no text below 11 px, nothing drawn outside its box, every control is a real parameter.
 namespace ui
@@ -16,9 +17,33 @@ const juce::Colour line         { 0x4df0e2c4 };                       // 30 % cr
 const juce::Colour brass        { 0xffb8893a };
 }
 
-inline juce::Font sans (float h, bool bold = false)  { return juce::Font (juce::FontOptions (h, bold ? juce::Font::bold : juce::Font::plain)); }
-inline juce::Font mono (float h, bool bold = false)  { return juce::Font (juce::FontOptions (juce::Font::getDefaultMonospacedFontName(), h, bold ? juce::Font::bold : juce::Font::plain)); }
-inline juce::Font serif (float h, bool bold = true)  { return juce::Font (juce::FontOptions (juce::Font::getDefaultSerifFontName(), h, bold ? juce::Font::bold : juce::Font::plain)); }
+// Embedded typefaces: IBM Plex Sans, IBM Plex Mono, Fraunces and Special Elite (all SIL Open Font License).
+inline juce::Typeface::Ptr face (const char* data, int size)
+{
+    return juce::Typeface::createSystemTypefaceFor (data, (size_t) size);
+}
+inline juce::Font sans (float h, bool bold = false)
+{
+    static auto reg = face (BinaryData::PlexSansRegular_ttf, BinaryData::PlexSansRegular_ttfSize);
+    static auto semi = face (BinaryData::PlexSansSemiBold_ttf, BinaryData::PlexSansSemiBold_ttfSize);
+    return juce::Font (juce::FontOptions (bold ? semi : reg).withHeight (h));
+}
+inline juce::Font mono (float h, bool bold = false)
+{
+    static auto reg = face (BinaryData::PlexMonoRegular_ttf, BinaryData::PlexMonoRegular_ttfSize);
+    static auto med = face (BinaryData::PlexMonoMedium_ttf, BinaryData::PlexMonoMedium_ttfSize);
+    return juce::Font (juce::FontOptions (bold ? med : reg).withHeight (h));
+}
+inline juce::Font serif (float h, bool = true)
+{
+    static auto f = face (BinaryData::FrauncesMedium_ttf, BinaryData::FrauncesMedium_ttfSize);
+    return juce::Font (juce::FontOptions (f).withHeight (h));
+}
+inline juce::Font typewriter (float h)
+{
+    static auto f = face (BinaryData::SpecialEliteRegular_ttf, BinaryData::SpecialEliteRegular_ttfSize);
+    return juce::Font (juce::FontOptions (f).withHeight (h));
+}
 
 inline void drawText (juce::Graphics& g, const juce::String& t, juce::Rectangle<int> r, juce::Font f, juce::Colour c,
                       juce::Justification j = juce::Justification::centredLeft)
