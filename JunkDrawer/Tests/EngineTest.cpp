@@ -349,6 +349,31 @@ int main()
         setP (sq, "seq_run", 0.f);
     }
 
+    // region morph
+    {
+        auto restart = [&] { setP (sq, "seq_run", 0.f); run (sq, 0.1, rate); setP (sq, "seq_run", 1.f); };
+        sq.sliceEqual (0, 2);
+        onlySteps ({ 0 });
+        setP (sq, jd::trackId (0, "morph"), 0.f);
+        restart();
+        o = run (sq, 0.2, rate);
+        juce::AudioBuffer<float> plain; plain.makeCopyOf (o);
+        setP (sq, jd::trackId (0, "morph"), 0.5f);
+        restart();
+        o = run (sq, 0.2, rate);
+        check (win (o, 100, 900) > 0.01f, "a half morph still plays the step");
+        setP (sq, jd::trackId (0, "morph"), 1.f);
+        restart();
+        o = run (sq, 0.2, rate);
+        float diff = 0.f;
+        for (int i = 100; i < 900; ++i) diff = juce::jmax (diff, std::abs (o.getSample (0, i) - plain.getSample (0, i)));
+        check (win (o, 100, 900) > 0.01f && diff > 0.01f, "a full morph plays the neighboring region instead");
+        setP (sq, jd::trackId (0, "morph"), 0.f);
+        setP (sq, "seq_run", 0.f);
+        sq.sliceEqual (0, 1);
+        onlySteps ({ 0, 2 });
+    }
+
     // ratchet shape
     {
         auto restart = [&] { setP (sq, "seq_run", 0.f); run (sq, 0.1, rate); setP (sq, "seq_run", 1.f); };

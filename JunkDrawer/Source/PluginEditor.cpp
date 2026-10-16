@@ -1290,10 +1290,21 @@ struct Junk : juce::Component
         play.onClick = [this] { proc.auditionWhole (track); };
         stop.onClick = [this] { proc.stopAudition (track); };
         for (auto* c : std::initializer_list<juce::Component*> { div.get(), feel.get(), swing.get(), tempo.get(), &run, snap.get(), &sliceEq, &sliceHit, &add, &sub, &play, &stop }) addAndMakeVisible (*c);
+        setTrack (0);
     }
 
     int regionCount() const { return juce::roundToInt (plainValue (proc, jd::trackId (track, "regions"))); }
-    void setTrack (int t) { track = t; }
+    void setTrack (int t)
+    {
+        track = t;
+        wMorph = std::make_unique<Watch> (proc.state, jd::trackId (t, "morph"), *this);
+        morphKnob = std::make_unique<Knob> (proc.state, jd::trackId (t, "morph"), "Morph", 22, juce::Colour (0xff2a1b10), juce::Colour (0xff5a4329));
+        morphKnob->showText = false;
+        morphKnob->slider.setTooltip ("Blends each step's region with the next region. 0 is the region alone, 100 is its neighbor.");
+        addAndMakeVisible (*morphKnob);
+        resized();
+        repaint();
+    }
 
     void resized() override
     {
@@ -1316,9 +1327,10 @@ struct Junk : juce::Component
         sliceHit.setBounds (rx + 94, 14 + 34, 88, 26);
         add.setBounds (rx, 14 + 66, 88, 26);
         sub.setBounds (rx + 94, 14 + 66, 88, 26);
-        snap->setBounds (rx + 16, 14 + 126, 150, 26);
-        play.setBounds (rx, 14 + 176, 88, 26);
-        stop.setBounds (rx + 94, 14 + 176, 88, 26);
+        snap->setBounds (rx + 16, 14 + 116, 150, 26);
+        if (morphKnob != nullptr) morphKnob->setBounds (rx + 54, 14 + 148, 30, 26);
+        play.setBounds (rx, 14 + 184, 88, 26);
+        stop.setBounds (rx + 94, 14 + 184, 88, 26);
     }
 
     static void card (juce::Graphics& g, juce::Rectangle<float> r, const juce::String& title)
@@ -1336,8 +1348,10 @@ struct Junk : juce::Component
         card (g, { 240.f, 14.f, 214.f, 222.f }, "REGIONS");
         card (g, { 466.f, 14.f, 214.f, 222.f }, "RUMMAGE");
         drawText (g, "Keep these lanes", { 466 + 16, 14 + 148, 182, 16 }, sans (11.f, true), juce::Colour (0xff5a4329));
+        drawText (g, "Morph", { 240 + 16, 14 + 150, 50, 22 }, sans (11.f, true), juce::Colour (0xff5a4329));
+        drawText (g, juce::String (juce::roundToInt (plainValue (proc, jd::trackId (track, "morph")) * 100.f)) + "%", { 240 + 16 + 98, 14 + 150, 60, 22 }, mono (11.f), juce::Colour (0xff5a4329));
         padBehind (g, { &rummage, &shakeBtn, &keep[0], &keep[1], &keep[2], &keep[3], &keep[4], &keep[5], div.get(), feel.get(), &run, snap.get(), &sliceEq, &sliceHit, &add, &sub, &play, &stop });
-        drawText (g, "Snap edges to", { 240 + 16, 14 + 104, 182, 18 }, sans (11.f, true), juce::Colour (0xff5a4329));
+        drawText (g, "Snap edges to", { 240 + 16, 14 + 96, 182, 18 }, sans (11.f, true), juce::Colour (0xff5a4329));
 
         const juce::Rectangle<float> plate (694.f, 50.f, 200.f, 150.f);
         g.setGradientFill (juce::ColourGradient (juce::Colour (0xffe6cd84), plate.getX(), plate.getY(), juce::Colour (0xff8a6728), plate.getRight(), plate.getBottom(), false));
@@ -1355,7 +1369,8 @@ struct Junk : juce::Component
     Proc& proc;
     int track = 0;
     std::unique_ptr<Seg> div, feel, snap;
-    std::unique_ptr<Knob> swing, tempo, shakeAmt;
+    std::unique_ptr<Knob> swing, tempo, shakeAmt, morphKnob;
+    std::unique_ptr<Watch> wMorph;
     juce::TextButton rummage, shakeBtn;
     std::array<juce::TextButton, jd::kRolled> keep;
     std::array<std::unique_ptr<juce::ButtonParameterAttachment>, jd::kRolled> keepAtt;

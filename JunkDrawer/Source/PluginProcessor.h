@@ -171,7 +171,7 @@ private:
     mutable juce::SpinLock slotLock;
     std::array<Slot, jd::kTracks> slots;
     std::array<std::atomic<int>, jd::kTracks> audition, playing, loadToken;
-    std::array<jd::RegionVoice, jd::kTracks> voices;
+    std::array<jd::RegionVoice, jd::kTracks> voices, morphVoices;     // the second set only sounds while a track's Morph is up
 
     juce::AudioFormatManager formats;
     juce::ThreadPool loader { 1 };
@@ -236,7 +236,7 @@ private:
     std::atomic<float>* pVolume = nullptr;
     std::atomic<float>* pPan = nullptr;
 
-    struct TrackPtrs { std::atomic<float>* mute; std::atomic<float>* solo; std::atomic<float>* level; std::atomic<float>* pan; std::atomic<float>* tune; std::atomic<float>* order; std::atomic<float>* cond; std::atomic<float>* rshape; };
+    struct TrackPtrs { std::atomic<float>* mute; std::atomic<float>* solo; std::atomic<float>* level; std::atomic<float>* pan; std::atomic<float>* tune; std::atomic<float>* order; std::atomic<float>* cond; std::atomic<float>* rshape; std::atomic<float>* morph; };
     std::array<TrackPtrs, jd::kTracks> tp {};
     struct RegionPtrs { std::atomic<float> *start, *end, *pitch, *gain, *pan, *cutoff, *reso, *drive, *attack, *decay, *sustain, *release, *loop, *reverse; };
     std::array<std::array<RegionPtrs, jd::kRegions>, jd::kTracks> rp {};

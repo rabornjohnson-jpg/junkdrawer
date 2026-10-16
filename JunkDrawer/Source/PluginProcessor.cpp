@@ -39,7 +39,7 @@ JunkDrawerProcessor::JunkDrawerProcessor()
         audition[(size_t) t] = 0; playing[(size_t) t] = 0; loadToken[(size_t) t] = 0;
         tp[(size_t) t] = { state.getRawParameterValue (jd::trackId (t, "mute")), state.getRawParameterValue (jd::trackId (t, "solo")),
                            state.getRawParameterValue (jd::trackId (t, "level")), state.getRawParameterValue (jd::trackId (t, "pan")),
-                           state.getRawParameterValue (jd::trackId (t, "tune")), state.getRawParameterValue (jd::trackId (t, "order")), state.getRawParameterValue (jd::trackId (t, "cond")), state.getRawParameterValue (jd::trackId (t, "rshape")) };
+                           state.getRawParameterValue (jd::trackId (t, "tune")), state.getRawParameterValue (jd::trackId (t, "order")), state.getRawParameterValue (jd::trackId (t, "cond")), state.getRawParameterValue (jd::trackId (t, "rshape")), state.getRawParameterValue (jd::trackId (t, "morph")) };
         for (int r = 0; r < jd::kRegions; ++r)
         {
             auto g = [&] (const char* s) { return state.getRawParameterValue (jd::regionId (t, r, s)); };
@@ -66,6 +66,7 @@ void JunkDrawerProcessor::prepareToPlay (double sampleRate, int)
     volume.setCurrentAndTargetValue (juce::Decibels::decibelsToGain (pVolume->load()));
     pan.setCurrentAndTargetValue (pPan->load());
     for (auto& v : voices) { v.prepare (sampleRate); v.kill(); }
+    for (auto& v : morphVoices) { v.prepare (sampleRate); v.kill(); }
     fxFilter.prepare (sampleRate); fxDelay.prepare (sampleRate); fxReverb.prepare (sampleRate); fxLimiter.prepare (sampleRate);
     for (auto& b : wasOn) b = false;
     for (int i = 0; i < jd::kLfos; ++i) for (int k = 0; k < 9; ++k) { lfoAcc[i][k] = 0.0; lfoSince[i][k] = 0.0; lfoRestartBeat[i][k] = 0.0; lfoOut[i][k].store (0.f); }
@@ -322,8 +323,8 @@ void JunkDrawerProcessor::processBlock (juce::AudioBuffer<float>& buf, juce::Mid
         for (int t = 0; t < jd::kTracks; ++t)
         {
             const bool audible = tp[(size_t) t].mute->load() < 0.5f && (! anySolo || tp[(size_t) t].solo->load() > 0.5f);
-            if (audible) voices[(size_t) t].render (l + from, r + from, to - from);
-            else         voices[(size_t) t].kill();
+            if (audible) { voices[(size_t) t].render (l + from, r + from, to - from); if (morphVoices[(size_t) t].isActive()) morphVoices[(size_t) t].render (l + from, r + from, to - from); }
+            else         { voices[(size_t) t].kill(); morphVoices[(size_t) t].kill(); }
         }
     };
 
@@ -430,7 +431,7 @@ void JunkDrawerProcessor::processBlock (juce::AudioBuffer<float>& buf, juce::Mid
             for (int t = 0; t < jd::kTracks; ++t)
             {
                 auto& q = seq[(size_t) t];
-                if (action[(size_t) t] == 2) { voices[(size_t) t].release(); continue; }
+                if (action[(size_t) t] == 2) { voices[(size_t) t].release(); morphVoices[(size_t) t].release(); continue; }
                 if (action[(size_t) t] != 1) continue;
                 std::shared_ptr<const jd::TrackData> d;
                 {
@@ -453,7 +454,24 @@ void JunkDrawerProcessor::processBlock (juce::AudioBuffer<float>& buf, juce::Mid
                     else if (shape == 3) s.pitch += 2.f * (float) juce::jmax (0, q.sub);
                 }
                 const float g = juce::Decibels::decibelsToGain (v (tp[(size_t) t].level), -59.f) * q.vol * shapeGain;
-                voices[(size_t) t].trigger (std::move (d), s, g, juce::jlimit (-1.f, 1.f, v (tp[(size_t) t].pan) + q.pan));
+                const float panNow = juce::jlimit (-1.f, 1.f, v (tp[(size_t) t].pan) + q.pan);
+                const float morph = v (tp[(size_t) t].morph);
+                const int count = juce::roundToInt (regCount[(size_t) t]->load());
+                if (morph > 0.001f && count > 1)
+                {
+                    // Morph: blend this step's region with the next one (equal power), so 0 is the region itself and 100 % is its neighbor.
+                    auto s2 = readRegion (t, q.region % count);
+                    s2.pitch += q.pitch + masterPitch + v (tp[(size_t) t].tune);
+                    if (q.dir == 1) s2.reverse = false; else if (q.dir == 2) s2.reverse = true;
+                    const float a = juce::jlimit (0.f, 1.f, morph) * juce::MathConstants<float>::halfPi;
+                    morphVoices[(size_t) t].trigger (d, s2, g * std::sin (a), panNow);
+                    voices[(size_t) t].trigger (std::move (d), s, g * std::cos (a), panNow);
+                }
+                else
+                {
+                    morphVoices[(size_t) t].release();
+                    voices[(size_t) t].trigger (std::move (d), s, g, panNow);
+                }
                 q.fromSeq = true;
             }
         }
@@ -461,7 +479,7 @@ void JunkDrawerProcessor::processBlock (juce::AudioBuffer<float>& buf, juce::Mid
     else
     {
         if (seqWasRunning)
-            for (int t = 0; t < jd::kTracks; ++t) { if (seq[(size_t) t].fromSeq) voices[(size_t) t].release(); seq[(size_t) t].fromSeq = false; seq[(size_t) t].step = -1; }
+            for (int t = 0; t < jd::kTracks; ++t) { if (seq[(size_t) t].fromSeq) { voices[(size_t) t].release(); morphVoices[(size_t) t].release(); } seq[(size_t) t].fromSeq = false; seq[(size_t) t].step = -1; }
         uiStep.store (-1, std::memory_order_relaxed);
         chainBar = -1; chainSlot = -1; chainStart = 0;
         uiChain.store (-1, std::memory_order_relaxed);
@@ -470,7 +488,7 @@ void JunkDrawerProcessor::processBlock (juce::AudioBuffer<float>& buf, juce::Mid
 
     // 3. voices (muted tracks are silent; solo silences the rest)
     renderVoices (segStart, n);
-    for (int t = 0; t < jd::kTracks; ++t) playing[(size_t) t].store (voices[(size_t) t].isActive() ? 1 : 0);
+    for (int t = 0; t < jd::kTracks; ++t) playing[(size_t) t].store (voices[(size_t) t].isActive() || morphVoices[(size_t) t].isActive() ? 1 : 0);
 
     // 4. effects, each skipped while it is off (and cleared when it comes back on, so no old tail jumps out)
     {
