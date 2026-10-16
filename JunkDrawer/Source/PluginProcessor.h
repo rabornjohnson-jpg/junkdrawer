@@ -5,7 +5,7 @@
 #include "Effects.h"
 #include "Modulation.h"
 
-class JunkDrawerProcessor : public juce::AudioProcessor, public juce::ChangeBroadcaster
+class JunkDrawerProcessor : public juce::AudioProcessor, public juce::ChangeBroadcaster, private juce::Timer
 {
 public:
     JunkDrawerProcessor();
@@ -50,6 +50,23 @@ public:
     std::vector<float> hitsFor (int track) const;                 // cached hit positions of the loaded sample
     jd::RegionSnapshot readRegion (int track, int region) const;
 
+    // Catch something: records the plugin's audio input into a track.  The take is kept in memory while it runs (up to 60 seconds,
+    // allocated only while a take is open), then saved as a 24-bit WAV in the Recordings folder and loaded like any other file.
+    // All of these run on the message thread.  Start: 0 now, 1 next bar (waits for the host transport), 2 when sound arrives.
+    // Length: 0 free, 1/2/4 bars.  Input: 0 both channels, 1 left only, 2 right only.
+    enum CatchState { CatchIdle = 0, CatchWaiting = 1, CatchRunning = 2, CatchDone = 3 };
+    bool startCatch (int track, int input, int start, int lengthBars);
+    void stopCatch (bool keep);                                   // keep = false throws the take away
+    int  catchState() const noexcept { return recState.load(); }
+    int  catchTrack() const noexcept { return recTrack.load(); }
+    double catchSeconds() const noexcept { return hostRate > 0.0 ? recLen.load() / hostRate : 0.0; }
+    /** The take so far, as `bins` peak values (0..1), for the live waveform. */
+    void catchPeaks (float* out, int bins) const;
+    void setInputMeter (bool on) noexcept { meterOn = on; }
+    float takeInputPeak() noexcept { return inPeak.exchange (0.f); }
+    static juce::File recordingsFolder();
+
+    //==========================================================================
     // LFO assignments.  A link says "this LFO moves this control by this much"; many controls per LFO and many LFOs per control are fine.
     // Only continuous controls can be linked.  These run on the message thread.
     static bool canModulate (juce::RangedAudioParameter* p) { return dynamic_cast<juce::AudioParameterFloat*> (p) != nullptr; }
@@ -99,6 +116,20 @@ private:
     juce::CriticalSection messageLock;
     juce::String loadMessage;
     std::atomic<bool> alive { true };
+
+    // ---- recording ----
+    void timerCallback() override;
+    void finishCatch (bool keep);
+    void captureInput (juce::AudioBuffer<float>& buf, int n, bool running, double ppq0, double dppq, double bpm);
+    std::atomic<int> recState { 0 }, recTrack { -1 }, recStop { 0 }, recLen { 0 };   // recStop: 1 = stop and keep, 2 = stop and discard
+    std::atomic<float> inPeak { 0.f };
+    std::atomic<bool> meterOn { false };
+    juce::AudioBuffer<float> recBuf;                                   // allocated before a take starts, freed when it ends
+    int recCap = 0, recPos = 0, recTarget = 0, recInputSel = 0, recStartMode = 0, recLenBars = 0;
+    long long recLastBar = -1;
+    int preLen = 0, prePos = 0, preFill = 0;
+    juce::AudioBuffer<float> recPre;                                   // short ring kept while waiting for sound, so the first hit is not clipped
+    double beatsPerBar = 4.0;
 
     // ---- modulation (audio thread unless noted) ----
     std::vector<jd::Assign> mods;                                      // message thread

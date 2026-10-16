@@ -38,6 +38,7 @@ JunkDrawerProcessor::JunkDrawerProcessor()
 JunkDrawerProcessor::~JunkDrawerProcessor()
 {
     alive = false;
+    stopTimer();
     loader.removeAllJobs (true, 5000);
 }
 
@@ -274,6 +275,7 @@ void JunkDrawerProcessor::processBlock (juce::AudioBuffer<float>& buf, juce::Mid
         if (auto pos = ph->getPosition())
         {
             hostKnown = true;
+            if (auto ts = pos->getTimeSignature()) beatsPerBar = juce::jmax (1.0, ts->numerator * 4.0 / juce::jmax (1, ts->denominator));
             if (auto b = pos->getBpm()) bpm = *b;
             if (pos->getIsPlaying())
             {
@@ -285,6 +287,7 @@ void JunkDrawerProcessor::processBlock (juce::AudioBuffer<float>& buf, juce::Mid
     if (ppq0 < 0.0) running = false;
     const double dppq = bpm / (60.0 * hostRate);
     internalPpq = running ? internalPpq + dppq * n : 0.0;
+    captureInput (buf, n, running, ppq0, dppq, bpm);              // the input is read here, then the buffer is cleared: nothing passes through
     updateModulation (n, running ? ppq0 : idleBeats, running, running && ! seqWasRunning, bpm);
     if (! running) idleBeats += dppq * n;
 
@@ -487,6 +490,176 @@ void JunkDrawerProcessor::rollSteps (int track, float chance)
 }
 
 void JunkDrawerProcessor::shake (int track) { rollSteps (track, state.getRawParameterValue ("shake_amt")->load()); }
+
+//==============================================================================
+// Catch something
+juce::File JunkDrawerProcessor::recordingsFolder()
+{
+    return juce::File::getSpecialLocation (juce::File::userApplicationDataDirectory).getChildFile ("Fading Fractal Audio").getChildFile ("Junk Drawer").getChildFile ("Recordings");
+}
+
+bool JunkDrawerProcessor::startCatch (int track, int input, int start, int lengthBars)
+{
+    if (recState.load() != CatchIdle || track < 0 || track >= jd::kTracks || hostRate <= 0.0) return false;
+    recCap = (int) std::floor (jd::kMaxSeconds * hostRate);
+    recBuf.setSize (2, recCap, false, true, false);
+    preLen = juce::jmax (64, (int) (hostRate * 0.1));
+    recPre.setSize (2, preLen, false, true, false);
+    recPos = 0; prePos = 0; preFill = 0; recTarget = 0; recLastBar = -1;
+    recInputSel = juce::jlimit (0, 2, input); recStartMode = juce::jlimit (0, 2, start);
+    recLenBars = lengthBars == 1 || lengthBars == 2 || lengthBars == 4 ? lengthBars : 0;
+    recLen.store (0); recStop.store (0);
+    recTrack.store (track);
+    recState.store (CatchWaiting, std::memory_order_release);
+    startTimerHz (20);
+    sendChangeMessage();
+    return true;
+}
+
+void JunkDrawerProcessor::stopCatch (bool keep)
+{
+    if (recState.load() == CatchIdle || recState.load() == CatchDone) return;
+    recStop.store (keep ? 1 : 2);
+}
+
+void JunkDrawerProcessor::catchPeaks (float* out, int bins) const
+{
+    for (int b = 0; b < bins; ++b) out[b] = 0.f;
+    const int len = recLen.load (std::memory_order_acquire);
+    if (len <= 0 || recBuf.getNumSamples() < len || bins <= 0) return;
+    const float* a = recBuf.getReadPointer (0);
+    const float* c = recBuf.getReadPointer (1);
+    for (int b = 0; b < bins; ++b)
+    {
+        const int from = (int) ((long long) len * b / bins), to = juce::jmax (from + 1, (int) ((long long) len * (b + 1) / bins));
+        float m = 0.f;
+        const int step = juce::jmax (1, (to - from) / 64);
+        for (int i = from; i < to && i < len; i += step) m = juce::jmax (m, std::abs (a[i]), std::abs (c[i]));
+        out[b] = juce::jmin (1.f, m);
+    }
+}
+
+void JunkDrawerProcessor::timerCallback()
+{
+    if (recState.load (std::memory_order_acquire) == CatchDone) { stopTimer(); finishCatch (recStop.load() != 2); }
+    else if (recState.load() == CatchIdle) stopTimer();
+}
+
+void JunkDrawerProcessor::finishCatch (bool keep)
+{
+    const int track = recTrack.load();
+    const int len = recLen.load();
+    auto take = std::make_shared<juce::AudioBuffer<float>> (std::move (recBuf));
+    recBuf = juce::AudioBuffer<float>();
+    recPre.setSize (0, 0);
+    recState.store (CatchIdle);
+    recTrack.store (-1);
+    if (! keep || len < (int) (hostRate * 0.05) || take->getNumSamples() < len) { sendChangeMessage(); return; }
+
+    const double rate = hostRate;
+    const auto file = recordingsFolder().getNonexistentChildFile ("Track " + juce::String (track + 1) + " " + juce::Time::getCurrentTime().formatted ("%Y-%m-%d %H-%M-%S"), ".wav");
+    loader.addJob ([this, take, len, rate, file, track]
+    {
+        file.getParentDirectory().createDirectory();
+        bool ok = false;
+        if (auto stream = file.createOutputStream())
+        {
+            juce::WavAudioFormat wav;
+            if (std::unique_ptr<juce::AudioFormatWriter> w (wav.createWriterFor (stream.get(), rate, 2, 24, {}, 0)); w != nullptr)
+            {
+                stream.release();
+                ok = w->writeFromAudioSampleBuffer (*take, 0, len);
+            }
+        }
+        if (! alive.load()) return;
+        juce::MessageManager::callAsync ([this, ok, file, track]
+        {
+            if (! alive.load()) return;
+            if (ok) loadFile (track, file, true);
+            else { const juce::ScopedLock sl (messageLock); loadMessage = "The recording could not be saved to " + file.getParentDirectory().getFullPathName(); sendChangeMessage(); }
+        });
+    });
+    sendChangeMessage();
+}
+
+// Audio thread.  Reads the input, feeds the meter and the take, then clears the buffer so the output only ever carries what the sequencer plays.
+void JunkDrawerProcessor::captureInput (juce::AudioBuffer<float>& buf, int n, bool running, double ppq0, double dppq, double bpm)
+{
+    // zero the input through plain pointers (AudioBuffer::clear() would mark the buffer as empty and confuse the pointers taken earlier)
+    auto wipe = [&] { for (int ch = 0; ch < buf.getNumChannels(); ++ch) juce::FloatVectorOperations::clear (buf.getWritePointer (ch), n); };
+    const int rs = recState.load (std::memory_order_acquire);
+    const bool active = rs == CatchWaiting || rs == CatchRunning;
+    if (! active && ! meterOn.load (std::memory_order_relaxed)) { wipe(); return; }
+
+    const float* inL = buf.getReadPointer (0);
+    const float* inR = buf.getReadPointer (1);
+    float pk = 0.f;
+    for (int i = 0; i < n; ++i) pk = juce::jmax (pk, std::abs (inL[i]), std::abs (inR[i]));
+    if (pk > inPeak.load (std::memory_order_relaxed)) inPeak.store (pk, std::memory_order_relaxed);
+    if (! active) { wipe(); return; }
+
+    auto pick = [&] (int i, float& a, float& b)
+    {
+        a = recInputSel == 2 ? inR[i] : inL[i];
+        b = recInputSel == 1 ? inL[i] : inR[i];
+        if (recInputSel == 0) { a = inL[i]; b = inR[i]; }
+    };
+    float* wl = recBuf.getWritePointer (0);
+    float* wr = recBuf.getWritePointer (1);
+    auto finish = [&] { recLen.store (recPos, std::memory_order_release); recState.store (CatchDone, std::memory_order_release); };
+
+    int from = 0;
+    const int stop = recStop.load();
+    if (rs == CatchWaiting)
+    {
+        if (stop != 0) { recPos = 0; finish(); wipe(); return; }
+        int trig = -1;
+        if (recStartMode == 0 || (recStartMode == 1 && ! running)) trig = 0;
+        else if (recStartMode == 1)
+        {
+            const long long bar0 = (long long) std::floor (ppq0 / beatsPerBar);
+            if (recLastBar < 0) recLastBar = bar0;
+            const double lastPpq = ppq0 + dppq * (n - 1);
+            const double boundary = (double) (recLastBar + 1) * beatsPerBar;
+            if (lastPpq >= boundary) { trig = juce::jlimit (0, n - 1, (int) std::ceil ((boundary - ppq0) / dppq)); recLastBar = (long long) std::floor (lastPpq / beatsPerBar); }
+        }
+        else
+        {
+            for (int i = 0; i < n; ++i)
+            {
+                float a, b; pick (i, a, b);
+                if (std::max (std::abs (a), std::abs (b)) > 0.01f) { trig = i; break; }
+                recPre.getWritePointer (0)[prePos] = a; recPre.getWritePointer (1)[prePos] = b;
+                prePos = (prePos + 1) % preLen; preFill = juce::jmin (preLen, preFill + 1);
+            }
+        }
+        if (trig < 0) { wipe(); return; }
+        if (recStartMode == 2)                                           // the quiet bit just before the hit goes first
+        {
+            const int first = (prePos - preFill + preLen) % preLen;
+            for (int k = 0; k < preFill; ++k) { wl[k] = recPre.getReadPointer (0)[(first + k) % preLen]; wr[k] = recPre.getReadPointer (1)[(first + k) % preLen]; }
+            recPos = preFill;
+        }
+        if (recLenBars > 0) recTarget = (int) std::floor (recLenBars * beatsPerBar * 60.0 / juce::jmax (1.0, bpm) * hostRate);
+        recState.store (CatchRunning, std::memory_order_relaxed);
+        from = trig;
+    }
+    else if (stop != 0) { finish(); wipe(); return; }
+
+    const int limit = recTarget > 0 ? juce::jmin (recTarget, recCap) : recCap;
+    for (int i = from; i < n; ++i)
+    {
+        if (recPos >= limit) { finish(); break; }
+        float a, b; pick (i, a, b);
+        wl[recPos] = a; wr[recPos] = b; ++recPos;
+    }
+    if (recState.load (std::memory_order_relaxed) == CatchRunning)
+    {
+        recLen.store (recPos, std::memory_order_release);
+        if (recPos >= limit) finish();
+    }
+    wipe();
+}
 
 //==============================================================================
 // LFOs.  Everything here runs once per block, so ten assignments or a hundred cost about the same.

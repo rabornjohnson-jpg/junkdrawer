@@ -482,6 +482,68 @@ int main()
         check (lr.getMods().size() == 1 && lr.modAmount ("fx_filter_cut", 3) == -0.4f, "assignments come back when a project is reloaded");
     }
 
+    std::printf ("Catch something\n");
+    {
+        const int T = 6;
+        auto runBlocks = [&] (int blocks, float level, float freq, float* lastOutPeak = nullptr)
+        {
+            juce::AudioBuffer<float> b (2, 256); juce::MidiBuffer m;
+            static double ph = 0.0;
+            for (int k = 0; k < blocks; ++k)
+            {
+                for (int i = 0; i < 256; ++i) { const float x = level * (float) std::sin (ph); ph += 6.2831853 * freq / rate; b.setSample (0, i, x); b.setSample (1, i, x * 0.5f); }
+                proc.processBlock (b, m);
+                if (lastOutPeak != nullptr) *lastOutPeak = b.getMagnitude (0, 256);
+            }
+        };
+        // start now, free length
+        check (proc.startCatch (T, 0, 0, 0), "a take can be started on an empty track");
+        check (! proc.startCatch (T, 0, 0, 0), "a second take cannot start while one is open");
+        float outPk = 1.f;
+        runBlocks (40, 0.5f, 440.f, &outPk);
+        check (proc.catchState() == JunkDrawerProcessor::CatchRunning, "a take that starts now is running at once");
+        check (outPk == 0.f, "the input does not pass through to the output");
+        proc.stopCatch (true);
+        runBlocks (1, 0.5f, 440.f);
+        check (waitForTrack (proc, T), "a finished take is saved and loaded into the track");
+        auto d = proc.getTrack (T);
+        check (d != nullptr && std::abs (d->length() - 40 * 256) <= 256, "it holds what was played (to the nearest block)");
+        check (d != nullptr && d->audio.getMagnitude (0, 0, 2000) > 0.4f && d->audio.getMagnitude (1, 0, 2000) < 0.3f, "both input channels were kept apart");
+        check (d != nullptr && juce::File (d->path).existsAsFile() && juce::File (d->path).getParentDirectory() == JunkDrawerProcessor::recordingsFolder(), "the take lives in the Recordings folder");
+        if (d != nullptr) juce::File (d->path).deleteFile();
+        proc.clearTrack (T);
+
+        // wait for sound, left channel only
+        check (proc.startCatch (T, 1, 2, 0), "a take can wait for sound");
+        runBlocks (30, 0.f, 440.f);
+        check (proc.catchState() == JunkDrawerProcessor::CatchWaiting, "it keeps waiting while the input is quiet");
+        runBlocks (10, 0.6f, 440.f);
+        check (proc.catchState() == JunkDrawerProcessor::CatchRunning, "it starts when sound arrives");
+        proc.stopCatch (true); runBlocks (1, 0.6f, 440.f);
+        check (waitForTrack (proc, T), "the take is loaded");
+        d = proc.getTrack (T);
+        check (d != nullptr && std::abs (d->length() - (10 * 256 + (int) (rate * 0.1))) <= 256, "the quiet lead-in is left out (only a 0.1 s pre-roll stays)");
+        check (d != nullptr && std::abs (d->audio.getSample (0, 6000) - d->audio.getSample (1, 6000)) < 1e-5f && d->audio.getMagnitude (0, 6000, 1000) > 0.3f, "left-only input fills both sides");
+        if (d != nullptr) juce::File (d->path).deleteFile();
+        proc.clearTrack (T);
+
+        // one bar at 120 BPM (no host) is two seconds
+        check (proc.startCatch (T, 0, 1, 1), "a take can run for one bar");
+        runBlocks ((int) (2.2 * rate / 256), 0.4f, 330.f);
+        check (proc.catchState() == JunkDrawerProcessor::CatchIdle || waitForTrack (proc, T), "it stops by itself at the end of the bar");
+        check (waitForTrack (proc, T), "the bar take is loaded");
+        d = proc.getTrack (T);
+        check (d != nullptr && std::abs (d->seconds() - 2.0) < 0.03, "and is two seconds long");
+        if (d != nullptr) juce::File (d->path).deleteFile();
+        proc.clearTrack (T);
+
+        // discard
+        check (proc.startCatch (T, 0, 0, 0), "a take can be started to be thrown away");
+        runBlocks (10, 0.5f, 440.f);
+        proc.stopCatch (false); runBlocks (1, 0.5f, 440.f); pump (300);
+        check (proc.getTrack (T) == nullptr && proc.catchState() == JunkDrawerProcessor::CatchIdle, "a discarded take leaves the track empty");
+    }
+
     std::printf ("Rummage\n");
     {
         auto steps = [&] (int lane) { std::vector<float> v; for (int k = 0; k < jd::kSteps; ++k) v.push_back (proc.state.getRawParameterValue (jd::stepId (0, k, lane))->load()); return v; };
