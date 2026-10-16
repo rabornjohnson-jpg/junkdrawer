@@ -23,6 +23,7 @@ inline const char* laneKey (int lane)
 inline juce::String stepId (int track, int step, int lane) { return "t" + juce::String (track + 1) + "_s" + juce::String (step + 1) + "_" + laneKey (lane); }
 inline juce::String laneLenId (int track, int lane)        { return "t" + juce::String (track + 1) + "_" + laneKey (lane) + "_n"; }
 inline const juce::StringArray kDirections { "Region", "Fwd", "Rev" };
+inline const juce::StringArray kStepFeels { "Straight", "Dotted", "Triplet" };
 inline const juce::StringArray kStepDivs   { "1/4", "1/8", "1/16", "1/32" };
 
 inline const juce::StringArray kLoopModes { "One-shot", "Loop", "Ping-pong" };
@@ -150,6 +151,7 @@ inline juce::AudioProcessorValueTreeState::ParameterLayout createLayout()
 
     // ---- Sequencer (global) ---------------------------------------------------------------------------------------
     addChoice (l, "seq_div", "Step length", kStepDivs, 2);
+    addChoice (l, "seq_feel", "Step feel", kStepFeels, 0);
     addFloat  (l, "seq_bpm", "Tempo without a host", { 40.f, 240.f, 0.1f }, 120.f, fmt (" BPM", 1));
     addBool   (l, "seq_run", "Run without a host", false);
 

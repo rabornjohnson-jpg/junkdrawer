@@ -217,6 +217,7 @@ int main()
     std::printf ("Sequencer\n");
     {
         long long s; double f;
+        check (std::abs (jd::stepBeats (2, 1) - 0.375) < 1e-9 && std::abs (jd::stepBeats (1, 2) - 1.0 / 3.0) < 1e-9 && jd::stepBeats (2) == 0.25, "dotted steps run 1.5 times longer and triplets 2/3 as long");
         jd::locateStep (3.5, 0.5, s, f);
         check (s == 3 && std::abs (f - 0.5) < 1.0e-9, "straight timing: halfway through step 4");
         jd::locateStep (1.0, 0.75, s, f);

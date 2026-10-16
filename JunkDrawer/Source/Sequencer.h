@@ -16,10 +16,11 @@ inline void locateStep (double u, double swing, long long& step, double& frac)
     frac = second ? (f2 - s) / (1.0 - s) : f2 / s;
 }
 
-inline double stepBeats (int divIndex)
+inline double stepBeats (int divIndex, int feel = 0)
 {
     static const double b[] = { 1.0, 0.5, 0.25, 0.125 };
-    return b[juce::jlimit (0, 3, divIndex)];
+    static const double f[] = { 1.0, 1.5, 2.0 / 3.0 };      // straight, dotted, triplet
+    return b[juce::jlimit (0, 3, divIndex)] * f[juce::jlimit (0, 2, feel)];
 }
 
 // Sync mode snaps the rate to 1/4x, 1/2x, 1x, 2x or 4x.

@@ -10,7 +10,7 @@ JunkDrawerProcessor::JunkDrawerProcessor()
     jd::registerFormats (formats);
     pVolume = state.getRawParameterValue ("m_volume");
     pPan    = state.getRawParameterValue ("m_pan");
-    pDiv = state.getRawParameterValue ("seq_div");   pBpm = state.getRawParameterValue ("seq_bpm");  pRun = state.getRawParameterValue ("seq_run");
+    pDiv = state.getRawParameterValue ("seq_div");   pFeel = state.getRawParameterValue ("seq_feel");   pBpm = state.getRawParameterValue ("seq_bpm");  pRun = state.getRawParameterValue ("seq_run");
     for (int i = 0; i < jd::kLfos; ++i)
     {
         auto g = [&] (const char* s) { return state.getRawParameterValue (jd::lfoId (i, s)); };
@@ -290,7 +290,7 @@ void JunkDrawerProcessor::processBlock (juce::AudioBuffer<float>& buf, juce::Mid
 
     double rate = v (pRate);
     if (pRateMode->load() > 0.5f) rate = jd::snapRate (rate);
-    const double beats = jd::stepBeats (juce::roundToInt (pDiv->load()));
+    const double beats = jd::stepBeats (juce::roundToInt (pDiv->load()), juce::roundToInt (pFeel->load()));
     const double u0 = ppq0 * rate / beats, dU = dppq * rate / beats;
     const double swing = v (pSwing);
     static const float ranges[] = { 12.f, 24.f, 48.f };

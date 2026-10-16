@@ -758,7 +758,8 @@ struct Liner : juce::Component, juce::FileDragAndDropTarget
                       { 16, 32, 656 - 70 - 8 - 80 - 12, 16 }, sans (11.f), ink.withAlpha (0.75f));
             drawText (g, "Steps", { 462, 268, 62, 24 }, sans (11.f, true), ink.withAlpha (0.85f), juce::Justification::centredRight);
             drawText (g, juce::String (proc.laneLength (track, grid.laneIndex())), { 554, 268, 36, 24 }, mono (13.f, true), ink, juce::Justification::centred);
-            drawText (g, jd::kStepDivs[juce::jlimit (0, 3, juce::roundToInt (plainValue (proc, "seq_div")))], { 620, 268, 52, 24 }, mono (11.f), ink.withAlpha (0.8f), juce::Justification::centredRight);
+            const int feel = juce::jlimit (0, 2, juce::roundToInt (plainValue (proc, "seq_feel")));
+            drawText (g, jd::kStepDivs[juce::jlimit (0, 3, juce::roundToInt (plainValue (proc, "seq_div")))] + (feel == 1 ? "d" : feel == 2 ? "t" : ""), { 620, 268, 52, 24 }, mono (11.f), ink.withAlpha (0.8f), juce::Justification::centredRight);
         }
         if (message.isNotEmpty())
             drawText (g, message, { 16, td == nullptr ? 350 : 404, 656, 18 }, sans (12.f), juce::Colour (0xff7a2e16), td == nullptr ? juce::Justification::centred : juce::Justification::centredLeft);
@@ -802,6 +803,8 @@ struct Junk : juce::Component
         auto& s = p.state;
         div = std::make_unique<Seg> (s, "seq_div", jd::kStepDivs);
         div->setTooltip ("How long one step is");
+        feel = std::make_unique<Seg> (s, "seq_feel", jd::kStepFeels);
+        feel->setTooltip ("Straight, dotted (1.5 times longer) or triplet (three in the space of two)");
         swing = std::make_unique<Knob> (s, "m_swing", "Swing", 38, juce::Colour (0xff2a1b10), juce::Colour (0xff5a4329));
         tempo = std::make_unique<Knob> (s, "seq_bpm", "Tempo", 38, juce::Colour (0xff2a1b10), juce::Colour (0xff5a4329));
         tempo->slider.setTooltip ("Only used when there is no host, such as the standalone app");
@@ -823,7 +826,7 @@ struct Junk : juce::Component
         sub.onClick = [this] { proc.removeRegion (track); };
         play.onClick = [this] { proc.auditionWhole (track); };
         stop.onClick = [this] { proc.stopAudition (track); };
-        for (auto* c : std::initializer_list<juce::Component*> { div.get(), swing.get(), tempo.get(), &run, snap.get(), &sliceEq, &sliceHit, &add, &sub, &play, &stop }) addAndMakeVisible (*c);
+        for (auto* c : std::initializer_list<juce::Component*> { div.get(), feel.get(), swing.get(), tempo.get(), &run, snap.get(), &sliceEq, &sliceHit, &add, &sub, &play, &stop }) addAndMakeVisible (*c);
     }
 
     int regionCount() const { return juce::roundToInt (plainValue (proc, jd::trackId (track, "regions"))); }
@@ -833,9 +836,10 @@ struct Junk : juce::Component
     {
         // pattern card at (14,14), regions card at (240,14); both 214 x 222
         div->setBounds (14 + 16, 14 + 36, 182, 24);
-        swing->setBounds (14 + 20, 14 + 74, 76, 76);
-        tempo->setBounds (14 + 118, 14 + 74, 76, 76);
-        run.setBounds (14 + 16, 14 + 168, 86, 28);
+        feel->setBounds (14 + 16, 14 + 64, 182, 24);
+        swing->setBounds (14 + 20, 14 + 96, 76, 76);
+        tempo->setBounds (14 + 118, 14 + 96, 76, 76);
+        run.setBounds (14 + 16, 14 + 184, 86, 28);
 
         const int rx = 240 + 16;
         sliceEq.setBounds (rx, 14 + 34, 88, 26);
@@ -860,7 +864,7 @@ struct Junk : juce::Component
         g.fillRect (getLocalBounds());
         card (g, { 14.f, 14.f, 214.f, 222.f }, "PATTERN");
         card (g, { 240.f, 14.f, 214.f, 222.f }, "REGIONS");
-        padBehind (g, { div.get(), &run, snap.get(), &sliceEq, &sliceHit, &add, &sub, &play, &stop });
+        padBehind (g, { div.get(), feel.get(), &run, snap.get(), &sliceEq, &sliceHit, &add, &sub, &play, &stop });
         drawText (g, "Snap edges to", { 240 + 16, 14 + 104, 182, 18 }, sans (11.f, true), juce::Colour (0xff5a4329));
 
         const juce::Rectangle<float> plate (470.f, 50.f, 424.f, 150.f);
@@ -878,7 +882,7 @@ struct Junk : juce::Component
 
     Proc& proc;
     int track = 0;
-    std::unique_ptr<Seg> div, snap;
+    std::unique_ptr<Seg> div, feel, snap;
     std::unique_ptr<Knob> swing, tempo;
     juce::TextButton run, sliceEq, sliceHit, add, sub, play, stop;
     std::unique_ptr<juce::ButtonParameterAttachment> runAtt;

@@ -142,7 +142,7 @@ private:
     std::array<std::array<StepPtrs, jd::kSteps>, jd::kTracks> sp {};
     std::array<std::array<std::atomic<float>*, jd::kLanes>, jd::kTracks> laneLen {};
     std::array<std::atomic<float>*, jd::kTracks> regCount {};
-    std::atomic<float> *pDiv = nullptr, *pBpm = nullptr, *pRun = nullptr, *pRate = nullptr, *pRateMode = nullptr, *pSwing = nullptr;
+    std::atomic<float> *pDiv = nullptr, *pFeel = nullptr, *pBpm = nullptr, *pRun = nullptr, *pRate = nullptr, *pRateMode = nullptr, *pSwing = nullptr;
 
     struct SeqTrack
     {
