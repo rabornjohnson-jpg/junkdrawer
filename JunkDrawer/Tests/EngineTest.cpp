@@ -707,6 +707,44 @@ int main()
         check (steps (jd::LaneVolume) != std::vector<float> (jd::kSteps, 0.3f), "an unkept lane gets re-rolled");
     }
 
+    std::printf ("Catch Last\n");
+    {
+        const int T = 6;
+        juce::AudioBuffer<float> b (2, 256); juce::MidiBuffer m;
+        auto feed = [&] (int blocks, float level)
+        {
+            for (int k = 0; k < blocks; ++k)
+            {
+                for (int i = 0; i < 256; ++i) { b.setSample (0, i, level); b.setSample (1, i, -level); }
+                proc.processBlock (b, m);
+            }
+        };
+        check (! proc.catchLast (T), "nothing to catch while it is switched off");
+        proc.setListening (true);
+        check (proc.catchLastSeconds() == 0.f, "nothing is held at first");
+        feed (10, 0.8f);
+        check (proc.catchLastSeconds() > 0.05f, "it counts what it has heard");
+        feed ((int) (rate * 2 / 256), 0.25f);
+        check (proc.catchLast (T), "the last stretch can be saved");
+        check (waitForTrack (proc, T), "the saved stretch is loaded");
+        auto d = proc.getTrack (T);
+        check (d != nullptr && std::abs (d->length() - (10 * 256 + (int) (rate * 2 / 256) * 256)) <= 512, "it holds everything heard so far");
+        check (d != nullptr && std::abs (d->audio.getSample (0, d->length() - 100) - 0.25f) < 0.01f && std::abs (d->audio.getSample (1, d->length() - 100) + 0.25f) < 0.01f, "the newest sound is at the end, channels kept apart");
+        check (d != nullptr && std::abs (d->audio.getSample (0, 100) - 0.8f) < 0.01f, "the oldest sound is at the start");
+        if (d != nullptr) juce::File (d->path).deleteFile();
+        proc.clearTrack (T);
+        check (proc.catchLastSeconds() == 0.f, "a catch empties the buffer");
+        feed ((int) (rate * 35 / 256), 0.5f);
+        check (proc.catchLastSeconds() <= (float) JunkDrawerProcessor::kCatchLastSeconds + 0.01f, "it never holds more than 30 seconds");
+        check (proc.catchLast (T) && waitForTrack (proc, T), "a full buffer can be saved");
+        d = proc.getTrack (T);
+        check (d != nullptr && std::abs (d->length() - (int) (30.0 * rate)) <= 1, "that is exactly 30 seconds");
+        if (d != nullptr) juce::File (d->path).deleteFile();
+        proc.clearTrack (T);
+        proc.setListening (false);
+        check (! proc.catchLast (T), "switching it off frees the buffer");
+    }
+
     std::printf ("Drawers\n");
     {
         check (proc.drawerCount() >= 100, "100 factory drawers");

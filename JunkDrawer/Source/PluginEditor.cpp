@@ -725,7 +725,15 @@ struct RecPanel : juce::Component, juce::Timer
             else proc.stopCatch (false);
             update();
         };
-        for (auto* c : std::initializer_list<juce::Component*> { &input, &start, &length, &go, &cancel }) addAndMakeVisible (*c);
+        listen.setClickingTogglesState (true);
+        listen.setButtonText ("Keep listening");
+        listen.setTooltip ("Keeps the last 30 seconds of input in memory, so you can save something that already went by. Uses about 12 MB while it is on.");
+        listen.setToggleState (proc.listening(), juce::dontSendNotification);
+        listen.onClick = [this] { proc.setListening (listen.getToggleState()); update(); };
+        grab.setButtonText ("Save last 30 s");
+        grab.setTooltip ("Grab whatever just went by and put it in this track");
+        grab.onClick = [this] { if (proc.catchLast (track) && onClose) onClose(); };
+        for (auto* c : std::initializer_list<juce::Component*> { &input, &start, &length, &go, &cancel, &listen, &grab }) addAndMakeVisible (*c);
         update();
     }
     ~RecPanel() override { proc.setInputMeter (false); }
@@ -751,6 +759,10 @@ struct RecPanel : juce::Component, juce::Timer
     {
         const bool active = proc.catchState() != Proc::CatchIdle;
         for (auto* c : std::initializer_list<juce::Component*> { &input, &start, &length }) c->setEnabled (! active);
+        listen.setVisible (! active);
+        grab.setVisible (! active);
+        grab.setEnabled (proc.listening() && proc.catchLastSeconds() >= 0.25f);
+        listen.setToggleState (proc.listening(), juce::dontSendNotification);
         go.setButtonText (active ? "Stop" : "Record");
         cancel.setButtonText (active ? "Discard" : "Cancel");
         go.setTooltip (active ? "Stop and keep the take" : "Start catching");
@@ -788,7 +800,7 @@ struct RecPanel : juce::Component, juce::Timer
         if (st != Proc::CatchIdle || elapsed > 0.0) { g.setColour (juce::Colour (0x47281608)); g.fillRect (well.getX(), mid, well.getWidth(), 1); }
 
         if (st == Proc::CatchIdle && elapsed <= 0.0)
-            drawText (g, "Press Record to start catching.", well.withTrimmedBottom (20), serif (15.f, false), ink.withAlpha (0.75f), juce::Justification::centred);
+            drawText (g, "Press Record to start catching.", well.withTrimmedBottom (44), serif (15.f, false), ink.withAlpha (0.75f), juce::Justification::centred);
         else
         {
             const double span = juce::jmax (10.0, std::ceil (elapsed / 5.0) * 5.0 + 5.0);
@@ -809,6 +821,15 @@ struct RecPanel : juce::Component, juce::Timer
                 g.setColour (juce::Colour (0x80281608)); g.fillRect (x, well.getBottom() - 8, 1, 8);
                 drawText (g, clock (t).dropLastCharacters (2), { x + 3, well.getBottom() - 20, 40, 16 }, mono (11.f), sub);
             }
+        }
+
+        if (st == Proc::CatchIdle)
+        {
+            const float have = proc.catchLastSeconds();
+            drawText (g, proc.listening() ? (have < 0.25f ? juce::String ("Listening. Nothing yet.") : juce::String (have, 1) + " s ready") : juce::String ("Not listening"),
+                      { well.getX() + 118, well.getBottom() - 34, 130, 24 }, sans (11.f), sub, juce::Justification::centred);
+            g.setColour (juce::Colour (0xf0241710));
+            for (auto* c : { &listen, &grab }) g.fillRoundedRectangle (c->getBounds().toFloat(), 4.f);
         }
 
         const int cx = 424;
@@ -840,6 +861,8 @@ struct RecPanel : juce::Component, juce::Timer
         length.setBounds (cx, 132, 216, 24);
         go.setBounds (cx, 164, 124, 28);
         cancel.setBounds (cx + 132, 164, 84, 28);
+        listen.setBounds (14 + 6, 34 + 164 - 34, 108, 28);
+        grab.setBounds (14 + 392 - 6 - 130, 34 + 164 - 34, 130, 28);
     }
 
     Proc& proc;
@@ -847,7 +870,7 @@ struct RecPanel : juce::Component, juce::Timer
     bool wasActive = false;
     float shown = 0.f;
     ui::PickSeg input, start, length;
-    juce::TextButton go, cancel;
+    juce::TextButton go, cancel, listen, grab;
     std::function<void()> onClose;
 };
 

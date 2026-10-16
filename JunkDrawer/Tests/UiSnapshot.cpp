@@ -156,8 +156,10 @@ int main (int argc, char** argv)
         for (int i = 0; i < 4; ++i) juce::MessageManager::getInstance()->runDispatchLoopUntil (40);
         if (auto* b = find (*editor)) b->triggerClick();
         proc.setInputMeter (true);
+        proc.setListening (true);
         juce::AudioBuffer<float> mb (2, 512); juce::MidiBuffer mm;
         for (int k = 0; k < 6; ++k) { for (int i = 0; i < 512; ++i) { mb.setSample (0, i, 0.35f * std::sin ((float) i * 0.1f)); mb.setSample (1, i, 0.35f * std::sin ((float) i * 0.1f)); } proc.processBlock (mb, mm); }
+        for (int k = 0; k < 400; ++k) proc.processBlock (mb, mm);
         for (int i = 0; i < 6; ++i) juce::MessageManager::getInstance()->runDispatchLoopUntil (40);
         auto img = editor->createComponentSnapshot (editor->getLocalBounds(), true, 1.0f);
         juce::PNGImageFormat png;

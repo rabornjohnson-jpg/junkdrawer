@@ -47,6 +47,7 @@ void JunkDrawerProcessor::prepareToPlay (double sampleRate, int)
 {
     const bool rateChanged = std::abs (sampleRate - hostRate) > 0.5;
     hostRate = sampleRate;
+    syncRing();
     volume.reset (sampleRate, 0.02);
     pan.reset (sampleRate, 0.02);
     volume.setCurrentAndTargetValue (juce::Decibels::decibelsToGain (pVolume->load()));
@@ -547,17 +548,8 @@ void JunkDrawerProcessor::timerCallback()
     else if (recState.load() == CatchIdle) stopTimer();
 }
 
-void JunkDrawerProcessor::finishCatch (bool keep)
+void JunkDrawerProcessor::writeTake (std::shared_ptr<juce::AudioBuffer<float>> take, int len, int track)
 {
-    const int track = recTrack.load();
-    const int len = recLen.load();
-    auto take = std::make_shared<juce::AudioBuffer<float>> (std::move (recBuf));
-    recBuf = juce::AudioBuffer<float>();
-    recPre.setSize (0, 0);
-    recState.store (CatchIdle);
-    recTrack.store (-1);
-    if (! keep || len < (int) (hostRate * 0.05) || take->getNumSamples() < len) { sendChangeMessage(); return; }
-
     const double rate = hostRate;
     const auto file = recordingsFolder().getNonexistentChildFile ("Track " + juce::String (track + 1) + " " + juce::Time::getCurrentTime().formatted ("%Y-%m-%d %H-%M-%S"), ".wav");
     loader.addJob ([this, take, len, rate, file, track]
@@ -581,7 +573,72 @@ void JunkDrawerProcessor::finishCatch (bool keep)
             else { const juce::ScopedLock sl (messageLock); loadMessage = "The recording could not be saved to " + file.getParentDirectory().getFullPathName(); sendChangeMessage(); }
         });
     });
+}
+
+void JunkDrawerProcessor::finishCatch (bool keep)
+{
+    const int track = recTrack.load();
+    const int len = recLen.load();
+    auto take = std::make_shared<juce::AudioBuffer<float>> (std::move (recBuf));
+    recBuf = juce::AudioBuffer<float>();
+    recPre.setSize (0, 0);
+    recState.store (CatchIdle);
+    recTrack.store (-1);
+    if (! keep || len < (int) (hostRate * 0.05) || take->getNumSamples() < len) { sendChangeMessage(); return; }
+
+    writeTake (take, len, track);
     sendChangeMessage();
+}
+
+// Catch Last: a rolling copy of the last 30 seconds of input, kept only while the person has it switched on.
+void JunkDrawerProcessor::setListening (bool on)
+{
+    listenWanted = on;
+    state.state.setProperty ("listen", on, nullptr);
+    syncRing();
+    sendChangeMessage();
+}
+
+void JunkDrawerProcessor::syncRing()
+{
+    const juce::SpinLock::ScopedLockType sl (ringLock);
+    if (! listenWanted) { ring.reset(); return; }
+    if (hostRate <= 0.0) return;
+    const int cap = (int) std::floor (kCatchLastSeconds * hostRate);
+    if (ring != nullptr && ring->buf.getNumSamples() == cap) return;
+    ring = std::make_unique<Ring>();
+    ring->buf.setSize (2, cap, false, true, false);
+}
+
+bool JunkDrawerProcessor::catchLast (int track)
+{
+    if (track < 0 || track >= jd::kTracks) return false;
+    std::shared_ptr<juce::AudioBuffer<float>> take;
+    int len = 0;
+    {
+        const juce::SpinLock::ScopedLockType sl (ringLock);                    // the audio thread skips its write while this is held
+        if (ring == nullptr) return false;
+        const int cap = ring->buf.getNumSamples();
+        len = juce::jmin (ring->filled, cap);
+        if (len < (int) (hostRate * 0.25)) return false;
+        take = std::make_shared<juce::AudioBuffer<float>> (2, len);
+        const int start = (ring->pos - len + cap) % cap;
+        const int first = juce::jmin (len, cap - start);
+        for (int ch = 0; ch < 2; ++ch)
+        {
+            take->copyFrom (ch, 0, ring->buf, ch, start, first);
+            if (first < len) take->copyFrom (ch, first, ring->buf, ch, 0, len - first);
+        }
+        ring->filled = 0;                                                      // the next catch starts from fresh sound
+    }
+    writeTake (take, len, track);
+    return true;
+}
+
+float JunkDrawerProcessor::catchLastSeconds() const
+{
+    const juce::SpinLock::ScopedTryLockType sl (ringLock);
+    return sl.isLocked() && ring != nullptr && hostRate > 0.0 ? (float) (ring->filled / hostRate) : 0.f;
 }
 
 // Audio thread.  Reads the input, feeds the meter and the take, then clears the buffer so the output only ever carries what the sequencer plays.
@@ -589,6 +646,26 @@ void JunkDrawerProcessor::captureInput (juce::AudioBuffer<float>& buf, int n, bo
 {
     // zero the input through plain pointers (AudioBuffer::clear() would mark the buffer as empty and confuse the pointers taken earlier)
     auto wipe = [&] { for (int ch = 0; ch < buf.getNumChannels(); ++ch) juce::FloatVectorOperations::clear (buf.getWritePointer (ch), n); };
+    {
+        const juce::SpinLock::ScopedTryLockType sl (ringLock);
+        if (sl.isLocked() && ring != nullptr)
+        {
+            const int cap = ring->buf.getNumSamples();
+            for (int ch = 0; ch < 2; ++ch)
+            {
+                const float* src = buf.getReadPointer (juce::jmin (ch, buf.getNumChannels() - 1));
+                int p = ring->pos, left = n, off = 0;
+                while (left > 0)
+                {
+                    const int k = juce::jmin (left, cap - p);
+                    juce::FloatVectorOperations::copy (ring->buf.getWritePointer (ch) + p, src + off, k);
+                    p = (p + k) % cap; off += k; left -= k;
+                }
+            }
+            ring->pos = (ring->pos + n) % cap;
+            ring->filled = juce::jmin (cap, ring->filled + n);
+        }
+    }
     const int rs = recState.load (std::memory_order_acquire);
     const bool active = rs == CatchWaiting || rs == CatchRunning;
     if (! active && ! meterOn.load (std::memory_order_relaxed)) { wipe(); return; }
@@ -854,6 +931,8 @@ void JunkDrawerProcessor::setStateInformation (const void* data, int size)
             state.replaceState (juce::ValueTree::fromXml (*xml));
             loadMods();
             drawerIndex = juce::jlimit (-1, drawerCount() - 1, (int) state.state.getProperty ("drawer", -1));
+            listenWanted = (bool) state.state.getProperty ("listen", false);
+            syncRing();
             auto node = state.state.getChildWithName ("samples");
             for (int t = 0; t < jd::kTracks; ++t)
             {

@@ -67,6 +67,13 @@ public:
     float takeInputPeak() noexcept { return inPeak.exchange (0.f); }
     static juce::File recordingsFolder();
 
+    // Catch Last: while switched on, the last 30 seconds of input are kept so they can be saved into a track.
+    static constexpr double kCatchLastSeconds = 30.0;
+    void setListening (bool on);
+    bool listening() const noexcept { return listenWanted; }
+    bool catchLast (int track);
+    float catchLastSeconds() const;
+
     // Drawers (presets): 100 factory drawers first, then the ones the person saved.
     int drawerCount() const { return 100 + (int) userDrawers.size(); }
     const jdp::Drawer& drawer (int i) const { return i < 100 ? jdp::factory()[(size_t) i] : userDrawers[(size_t) (i - 100)]; }
@@ -157,6 +164,12 @@ private:
     std::vector<jd::Assign> mods;                                      // message thread
     int armed = -1;
     void publishMods();
+    struct Ring { juce::AudioBuffer<float> buf; int pos = 0, filled = 0; };
+    mutable juce::SpinLock ringLock;
+    std::unique_ptr<Ring> ring;
+    bool listenWanted = false;
+    void syncRing();
+    void writeTake (std::shared_ptr<juce::AudioBuffer<float>> take, int len, int track);
     std::vector<jdp::Drawer> userDrawers;
     int drawerIndex = -1;
     void saveMods();
