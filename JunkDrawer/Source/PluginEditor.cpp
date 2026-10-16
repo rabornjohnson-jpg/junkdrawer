@@ -631,13 +631,164 @@ struct StepGrid : juce::Component, juce::Timer, juce::SettableTooltipClient
     juce::int64 sig = -1;
 };
 
+// Catch something: the panel that takes the place of the waveform sheet while a take is set up or running.
+struct RecPanel : juce::Component, juce::Timer
+{
+    explicit RecPanel (Proc& p) : proc (p), input ({ "1 + 2", "Left", "Right" }), start ({ "Now", "Next bar", "Level" }), length ({ "Free", "1 bar", "2 bars", "4 bars" })
+    {
+        input.setTooltip ("Which input channels to record. Left or Right alone is copied to both sides.");
+        start.setTooltip ("Now starts at once. Next bar waits for the next bar line while the host plays (with the host stopped it starts at once). Level waits for sound, and keeps the moment just before it.");
+        length.setTooltip ("Free runs until you press Stop. A bar count stops by itself, up to the 60 second limit.");
+        go.setTooltip ("Start catching"); cancel.setTooltip ("Close without recording");
+        go.onClick = [this]
+        {
+            if (proc.catchState() == Proc::CatchIdle) { static const int bars[] = { 0, 1, 2, 4 }; proc.startCatch (track, input.selected(), start.selected(), bars[length.selected()]); }
+            else proc.stopCatch (true);
+            update();
+        };
+        cancel.onClick = [this]
+        {
+            if (proc.catchState() == Proc::CatchIdle) { if (onClose) onClose(); }
+            else proc.stopCatch (false);
+            update();
+        };
+        for (auto* c : std::initializer_list<juce::Component*> { &input, &start, &length, &go, &cancel }) addAndMakeVisible (*c);
+        update();
+    }
+    ~RecPanel() override { proc.setInputMeter (false); }
+
+    void setTrack (int t) { track = t; update(); }
+    void visibilityChanged() override
+    {
+        proc.setInputMeter (isShowing());
+        if (isShowing()) { wasActive = proc.catchState() != Proc::CatchIdle; startTimerHz (30); update(); } else stopTimer();
+    }
+
+    void timerCallback() override
+    {
+        shown = juce::jmax (proc.takeInputPeak(), shown * 0.86f);
+        const bool active = proc.catchState() != Proc::CatchIdle;
+        if (wasActive && ! active && onClose) { wasActive = false; onClose(); return; }
+        wasActive = active;
+        update();
+        repaint();
+    }
+
+    void update()
+    {
+        const bool active = proc.catchState() != Proc::CatchIdle;
+        for (auto* c : std::initializer_list<juce::Component*> { &input, &start, &length }) c->setEnabled (! active);
+        go.setButtonText (active ? "Stop" : "Record");
+        cancel.setButtonText (active ? "Discard" : "Cancel");
+        go.setTooltip (active ? "Stop and keep the take" : "Start catching");
+        cancel.setTooltip (active ? "Throw the take away" : "Close without recording");
+    }
+
+    static juce::String clock (double s)
+    {
+        const int m = (int) (s / 60.0);
+        return juce::String (m) + ":" + juce::String (s - m * 60.0, 1).paddedLeft ('0', 4);
+    }
+
+    void paint (juce::Graphics& g) override
+    {
+        update();
+        const auto ink = juce::Colour (0xff2a1b10), red = juce::Colour (0xffb5532f), sub = juce::Colour (0xff5a4329);
+        const auto r = getLocalBounds().toFloat();
+        g.setColour (juce::Colour (0xfff1e7c9)); g.fillRoundedRectangle (r, 3.f);
+        g.setColour (juce::Colour (0x4d5a3c1e)); g.drawRoundedRectangle (r.reduced (0.5f), 3.f, 1.f);
+
+        const int st = proc.catchState();
+        const bool running = st == Proc::CatchRunning, waiting = st == Proc::CatchWaiting;
+        g.setColour (running ? red : (waiting ? juce::Colour (0xffb8893a) : juce::Colour (0xff9a8a68)));
+        g.fillEllipse (14.f, 15.f, 11.f, 11.f);
+        const juce::String stateLabel = running ? "CATCHING" : waiting ? (start.selected() == 1 ? "WAITING FOR THE BAR" : "WAITING FOR SOUND") : "READY";
+        drawText (g, stateLabel, { 32, 10, 190, 20 }, sans (11.f, true).withExtraKerningFactor (0.14f), running ? red : sub);
+        if (running) drawText (g, clock (proc.catchSeconds()), { 222, 10, 70, 20 }, mono (13.f, true), ink);
+        drawText (g, "Up to 1:00 per track", { 272, 10, 134, 20 }, sans (11.f), sub, juce::Justification::centredRight);
+
+        const juce::Rectangle<int> well (14, 34, 392, 164);
+        g.setColour (juce::Colour (0xffe6dab6)); g.fillRoundedRectangle (well.toFloat(), 2.f);
+        g.setColour (juce::Colour (0x59281608)); g.drawRoundedRectangle (well.toFloat().reduced (0.5f), 2.f, 1.f);
+        const int mid = well.getCentreY() - 8;
+        const double elapsed = proc.catchSeconds();
+        if (st != Proc::CatchIdle || elapsed > 0.0) { g.setColour (juce::Colour (0x47281608)); g.fillRect (well.getX(), mid, well.getWidth(), 1); }
+
+        if (st == Proc::CatchIdle && elapsed <= 0.0)
+            drawText (g, "Press Record to start catching.", well.withTrimmedBottom (20), serif (15.f, false), ink.withAlpha (0.75f), juce::Justification::centred);
+        else
+        {
+            const double span = juce::jmax (10.0, std::ceil (elapsed / 5.0) * 5.0 + 5.0);
+            const int cols = juce::jlimit (0, well.getWidth(), (int) std::round (elapsed / span * well.getWidth()));
+            std::vector<float> pk ((size_t) juce::jmax (1, cols));
+            if (cols > 0) proc.catchPeaks (pk.data(), cols);
+            g.setColour (juce::Colour (0xe03a2415));
+            for (int x = 0; x < cols; ++x)
+            {
+                const float h = juce::jmax (1.f, pk[(size_t) x] * (float) (well.getHeight() - 40) * 0.5f);
+                g.fillRect ((float) (well.getX() + x), (float) mid - h, 1.f, 2.f * h);
+            }
+            g.setColour (red); g.fillRect (well.getX() + cols, well.getY(), 2, well.getHeight());
+            const double step = span <= 20.0 ? 5.0 : span <= 40.0 ? 10.0 : 15.0;
+            for (double t = 0.0; t < span - 0.01; t += step)
+            {
+                const int x = well.getX() + (int) std::round (t / span * well.getWidth());
+                g.setColour (juce::Colour (0x80281608)); g.fillRect (x, well.getBottom() - 8, 1, 8);
+                drawText (g, clock (t).dropLastCharacters (2), { x + 3, well.getBottom() - 20, 40, 16 }, mono (11.f), sub);
+            }
+        }
+
+        const int cx = 424;
+        auto label = [&] (const juce::String& t, int y) { drawText (g, t, { cx, y, 216, 12 }, sans (11.f, true).withExtraKerningFactor (0.14f), sub); };
+        label ("INPUT", 8); label ("START", 71); label ("LENGTH", 117);
+
+        const float db = juce::Decibels::gainToDecibels (shown, -60.f);
+        const juce::Rectangle<float> bar ((float) cx, 54.f, 164.f, 8.f);
+        g.setColour (juce::Colour (0xff3a2415)); g.fillRoundedRectangle (bar, 4.f);
+        const float f = juce::jlimit (0.f, 1.f, (db + 60.f) / 60.f);
+        g.saveState(); g.reduceClipRegion (bar.withWidth (bar.getWidth() * f).toNearestInt());
+        g.setGradientFill (juce::ColourGradient (juce::Colour (0xff9bb36a), bar.getX(), 0.f, juce::Colour (0xffb5654f), bar.getRight(), 0.f, false));
+        g.fillRoundedRectangle (bar, 4.f); g.restoreState();
+        drawText (g, db <= -59.f ? "-inf" : juce::String (juce::roundToInt (db)) + " dB", { cx + 172, 49, 44, 18 }, mono (11.f), sub, juce::Justification::centredRight);
+
+        g.setColour (juce::Colour (0xf0241710));
+        for (auto* c : std::initializer_list<juce::Component*> { &input, &start, &length, &cancel }) g.fillRoundedRectangle (c->getBounds().toFloat(), 4.f);
+        g.setColour (st == Proc::CatchIdle ? red : juce::Colour (0xf0241710));
+        g.fillRoundedRectangle (go.getBounds().toFloat(), 4.f);
+        if (st == Proc::CatchIdle) { g.setColour (juce::Colour (0xfffff4e0)); g.fillEllipse ((float) go.getX() + 22.f, (float) go.getBounds().getCentreY() - 4.5f, 9.f, 9.f); }
+        else { g.setColour (red); g.fillRoundedRectangle ((float) go.getX() + 22.f, (float) go.getBounds().getCentreY() - 4.5f, 9.f, 9.f, 1.f); }
+    }
+
+    void resized() override
+    {
+        const int cx = 424;
+        input.setBounds (cx, 23, 216, 24);
+        start.setBounds (cx, 86, 216, 24);
+        length.setBounds (cx, 132, 216, 24);
+        go.setBounds (cx, 164, 124, 28);
+        cancel.setBounds (cx + 132, 164, 84, 28);
+    }
+
+    Proc& proc;
+    int track = 0;
+    bool wasActive = false;
+    float shown = 0.f;
+    ui::PickSeg input, start, length;
+    juce::TextButton go, cancel;
+    std::function<void()> onClose;
+};
+
 struct Liner : juce::Component, juce::FileDragAndDropTarget
 {
-    explicit Liner (Proc& p) : proc (p), wave (p), grid (p)
+    explicit Liner (Proc& p) : proc (p), wave (p), grid (p), rec (p)
     {
         browse.setButtonText ("Browse");  browse.setTooltip ("Pick a sound file. You can also drop one anywhere on this paper.");
         clear.setButtonText ("Clear");    clear.setTooltip ("Take the sound out of this track");
-        for (auto* b : { &browse, &clear }) addAndMakeVisible (*b);
+        record.setButtonText ("Record"); record.setTooltip ("Catch something: record from the plugin's audio input into this track");
+        for (auto* b : { &browse, &clear, &record }) addAndMakeVisible (*b);
+        addChildComponent (rec);
+        record.onClick = [this] { if (proc.catchState() == Proc::CatchIdle) { recOpen = ! recOpen; rec.setTrack (track); refresh(); } };
+        rec.onClose = [this] { recOpen = false; refresh(); };
         browse.onClick = [this] { openChooser(); };
         clear.onClick = [this] { proc.clearTrack (track); };
         addAndMakeVisible (wave);
@@ -678,6 +829,8 @@ struct Liner : juce::Component, juce::FileDragAndDropTarget
     void setTrack (int t)
     {
         track = t;
+        recOpen = proc.catchState() != Proc::CatchIdle && proc.catchTrack() == t;
+        rec.setTrack (t);
         selected = juce::jlimit (0, juce::jmax (0, regionCount() - 1), regions[(size_t) t]);
         wave.setTrack (track, selected);
         grid.setTrack (track);
@@ -706,11 +859,16 @@ struct Liner : juce::Component, juce::FileDragAndDropTarget
     void refresh()
     {
         const bool loaded = proc.getTrack (track) != nullptr;
+        if (proc.catchState() != Proc::CatchIdle && proc.catchTrack() == track) recOpen = true;     // a take started from elsewhere shows its panel
         if (selected >= regionCount()) pick (regionCount() - 1);
         if (loaded && tag == nullptr) buildTag();
         if (! loaded) tag.reset();
         for (auto* c : std::initializer_list<juce::Component*> { &wave, &grid, &clear, &less, &more, &tabs[0], &tabs[1], &tabs[2], &tabs[3], &tabs[4], &tabs[5] })
             c->setVisible (loaded);
+        wave.setVisible (loaded && ! recOpen);
+        rec.setVisible (recOpen);
+        record.setToggleState (recOpen, juce::dontSendNotification);
+        record.setEnabled (proc.catchState() == Proc::CatchIdle);
         const auto m = proc.takeLoadMessage();
         if (m.isNotEmpty()) message = m;
         else if (loaded) message = {};
@@ -722,8 +880,10 @@ struct Liner : juce::Component, juce::FileDragAndDropTarget
     {
         const bool loaded = proc.getTrack (track) != nullptr;
         clear.setBounds (16 + 656 - 70, 12, 70, 28);
-        browse.setBounds (loaded ? 16 + 656 - 70 - 8 - 80 : (getWidth() - 120) / 2, loaded ? 12 : 268, 80 + (loaded ? 0 : 40), 28);
+        browse.setBounds (loaded ? 16 + 656 - 70 - 8 - 80 : getWidth() / 2 - 128, loaded ? 12 : 268, loaded ? 80 : 120, 28);
+        record.setBounds (loaded ? 16 + 656 - 70 - 8 - 80 - 8 - 80 : getWidth() / 2 + 8, loaded ? 12 : 268, loaded ? 80 : 120, 28);
         wave.setBounds (16, 56, 656, 204);
+        rec.setBounds (16, 56, 656, 204);
         int x = 16;
         const int w[] = { 64, 64, 56, 66, 76, 64 };
         for (int i = 0; i < jd::kLanes; ++i) { tabs[(size_t) i].setBounds (x, 268, w[i], 24); x += w[i] + 5; }
@@ -742,20 +902,20 @@ struct Liner : juce::Component, juce::FileDragAndDropTarget
         g.setColour (juce::Colour (0x99281608));
         g.drawRect (r, 1.f);
 
-        padBehind (g, { &browse, &clear, &tabs[0], &tabs[1], &tabs[2], &tabs[3], &tabs[4], &tabs[5], &less, &more });
+        padBehind (g, { &browse, &record, &clear, &tabs[0], &tabs[1], &tabs[2], &tabs[3], &tabs[4], &tabs[5], &less, &more });
 
         auto td = proc.getTrack (track);
-        if (td == nullptr)
+        if (td == nullptr && ! recOpen)
         {
             drawText (g, "Nothing in here yet.", getLocalBounds().withHeight (200).withY (80), serif (26.f, false), ink, juce::Justification::centred);
             drawText (g, "Drop something in.", getLocalBounds().withHeight (30).withY (200), sans (14.f), ink.withAlpha (0.8f), juce::Justification::centred);
             drawText (g, "WAV, AIFF, FLAC, MP3 and Ogg all fit.", getLocalBounds().withHeight (20).withY (312), sans (12.f), ink.withAlpha (0.65f), juce::Justification::centred);
         }
-        else
+        else if (td != nullptr)
         {
-            drawText (g, td->name, { 16, 10, 656 - 70 - 8 - 80 - 12, 22 }, serif (18.f, false), ink);
+            drawText (g, td->name, { 16, 10, 656 - 70 - 8 - 80 - 8 - 80 - 12, 22 }, serif (18.f, false), ink);
             drawText (g, seconds (td->seconds()) + "  " + juce::String::charToString (0x00b7) + "  " + juce::String (regionCount()) + (regionCount() == 1 ? " region" : " regions"),
-                      { 16, 32, 656 - 70 - 8 - 80 - 12, 16 }, sans (11.f), ink.withAlpha (0.75f));
+                      { 16, 32, 656 - 70 - 8 - 80 - 8 - 80 - 12, 16 }, sans (11.f), ink.withAlpha (0.75f));
             drawText (g, "Steps", { 462, 268, 62, 24 }, sans (11.f, true), ink.withAlpha (0.85f), juce::Justification::centredRight);
             drawText (g, juce::String (proc.laneLength (track, grid.laneIndex())), { 554, 268, 36, 24 }, mono (13.f, true), ink, juce::Justification::centred);
             const int feel = juce::jlimit (0, 2, juce::roundToInt (plainValue (proc, "seq_feel")));
@@ -790,7 +950,9 @@ struct Liner : juce::Component, juce::FileDragAndDropTarget
     StepGrid grid;
     std::unique_ptr<RegionTag> tag;
     std::array<juce::TextButton, jd::kLanes> tabs;
-    juce::TextButton browse, clear, less, more;
+    juce::TextButton browse, clear, record, less, more;
+    RecPanel rec;
+    bool recOpen = false;
     juce::String message;
     std::unique_ptr<juce::FileChooser> chooser;
 };

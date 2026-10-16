@@ -262,6 +262,41 @@ private:
 };
 
 //==============================================================================
+// A row of choices that is not a parameter (settings of a dialog or a take).  Same look as Seg.
+class PickSeg : public juce::Component, public juce::SettableTooltipClient
+{
+public:
+    explicit PickSeg (juce::StringArray items, int initial = 0) : labels (std::move (items)), idx (initial) {}
+    int selected() const noexcept { return idx; }
+    void setSelected (int i) { idx = juce::jlimit (0, labels.size() - 1, i); repaint(); }
+    void paint (juce::Graphics& g) override
+    {
+        const auto r = getLocalBounds().toFloat();
+        const float a = isEnabled() ? 1.f : 0.45f;
+        g.setColour (pal::line.withMultipliedAlpha (a));
+        g.drawRoundedRectangle (r.reduced (0.5f), 4.f, 1.f);
+        const int n = labels.size();
+        for (int i = 0; i < n; ++i)
+        {
+            auto cell = juce::Rectangle<int> (juce::roundToInt (r.getWidth() * i / n), 0, juce::roundToInt (r.getWidth() * (i + 1) / n) - juce::roundToInt (r.getWidth() * i / n), getHeight());
+            const bool on = i == idx;
+            if (on) { g.setColour (pal::amber.withMultipliedAlpha (a)); g.fillRoundedRectangle (cell.toFloat().reduced (1.f), 3.f); }
+            drawText (g, labels[i], cell.reduced (2, 0), sans (11.f, true), (on ? pal::amberInk : pal::textSoft).withMultipliedAlpha (a), juce::Justification::centred);
+        }
+    }
+    void mouseDown (const juce::MouseEvent& e) override
+    {
+        if (! isEnabled()) return;
+        setSelected (e.x * labels.size() / juce::jmax (1, getWidth()));
+        if (onChange) onChange();
+    }
+    std::function<void()> onChange;
+private:
+    juce::StringArray labels;
+    int idx = 0;
+};
+
+//==============================================================================
 // Dark inset panel with an optional title.
 struct Panel : juce::Component, private juce::ChangeListener
 {

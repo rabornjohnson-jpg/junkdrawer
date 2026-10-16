@@ -55,7 +55,7 @@ Step-lane engine, LFO engine, file loading, DAW recording pipeline. Pull these i
 - Global defaults for step length and playback rate; per-step values are offsets from the default.
 - Swing and per-track lane length.
 
-### Stage 4: Recording
+### Stage 4: Recording (built: Record, input, start, length, 60 s cap; still to do: replace/overdub choice, Catch Last rolling buffer, save-to-file option, latency report, feedback warning)
 - Per-track Record button, capturing from the plugin's audio input.
 - Sync options: immediate, next bar, or fixed length (1, 2, 4, 8 bars). Short pre-roll buffer.
 - Replace or overdub.

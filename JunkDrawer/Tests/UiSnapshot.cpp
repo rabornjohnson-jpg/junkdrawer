@@ -140,6 +140,60 @@ int main (int argc, char** argv)
         png.writeImageToStream (img, fs);
         problems += checkLayout (*editor, names[p]);
     }
+    // the recording panel, set up and ready (opened with the Record button, as a person would)
+    {
+        std::function<juce::TextButton*(juce::Component&)> find = [&] (juce::Component& c) -> juce::TextButton*
+        {
+            for (auto* ch : c.getChildren())
+            {
+                if (auto* b = dynamic_cast<juce::TextButton*> (ch)) if (b->getButtonText() == "Record" && b->isVisible()) return b;
+                if (auto* f = find (*ch)) return f;
+            }
+            return nullptr;
+        };
+        editor->showPage (0);
+        for (int i = 0; i < 4; ++i) juce::MessageManager::getInstance()->runDispatchLoopUntil (40);
+        if (auto* b = find (*editor)) b->triggerClick();
+        proc.setInputMeter (true);
+        juce::AudioBuffer<float> mb (2, 512); juce::MidiBuffer mm;
+        for (int k = 0; k < 6; ++k) { for (int i = 0; i < 512; ++i) { mb.setSample (0, i, 0.35f * std::sin ((float) i * 0.1f)); mb.setSample (1, i, 0.35f * std::sin ((float) i * 0.1f)); } proc.processBlock (mb, mm); }
+        for (int i = 0; i < 6; ++i) juce::MessageManager::getInstance()->runDispatchLoopUntil (40);
+        auto img = editor->createComponentSnapshot (editor->getLocalBounds(), true, 1.0f);
+        juce::PNGImageFormat png;
+        auto f = out.getChildFile ("record_ready.png");
+        f.deleteFile();
+        juce::FileOutputStream fs (f);
+        png.writeImageToStream (img, fs);
+        problems += checkLayout (*editor, "record-ready");
+    }
+    // a take in progress: the recording panel replaces the waveform sheet
+    {
+        proc.startCatch (0, 0, 0, 0);
+        juce::AudioBuffer<float> rb (2, 512);
+        for (int b = 0; b < 140; ++b)
+        {
+            for (int i = 0; i < 512; ++i)
+            {
+                const double t = (double) (b * 512 + i) / 48000.0;
+                const float env = 0.15f + 0.7f * std::abs ((float) std::sin (t * 2.3)) * (0.5f + 0.5f * (float) std::sin (t * 17.0));
+                const float v = env * std::sin ((float) t * 900.f);
+                rb.setSample (0, i, v); rb.setSample (1, i, v * 0.8f);
+            }
+            proc.processBlock (rb, midi);
+        }
+        editor->showPage (0);
+        for (int i = 0; i < 6; ++i) juce::MessageManager::getInstance()->runDispatchLoopUntil (40);
+        auto img = editor->createComponentSnapshot (editor->getLocalBounds(), true, 1.0f);
+        juce::PNGImageFormat png;
+        auto f = out.getChildFile ("record.png");
+        f.deleteFile();
+        juce::FileOutputStream fs (f);
+        png.writeImageToStream (img, fs);
+        problems += checkLayout (*editor, "record");
+        proc.stopCatch (false);
+        proc.processBlock (rb, midi);
+        for (int i = 0; i < 6; ++i) juce::MessageManager::getInstance()->runDispatchLoopUntil (60);
+    }
     std::printf ("layout problems: %d\n", problems);
     ed.reset();
     return problems == 0 ? 0 : 1;
