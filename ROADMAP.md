@@ -4,14 +4,14 @@ A Fading Fractal Audio plugin. An 8-track sample sequencer: cut each sample into
 
 **Pitch:** Chop any sound into regions and let the sequencer decide which piece plays on every step.
 
-Status: concept locked (Oct 2026). Name confirmed: Junk Drawer. Run a trademark check before release (see Open Items).
+Status: concept and UI design locked (Oct 2026); build starting. Name confirmed: Junk Drawer. Run a trademark check before release (see Open Items).
 
 ---
 
 ## Identity
 
 - **Family feel:** melancholy, warm, but fun. Same Fading Fractal Audio logo and name in the UI header.
-- **Concept:** a real junk drawer pulled open. Warm wood, tarnished brass, dusty amber light, objects that look well used.
+- **Concept:** one real junk drawer seen from above. Warm wood, tarnished brass, dusty amber light, real photographed objects. Realistic, not cartoonish.
 - **Distinct from DriftLooper:** DriftLooper is about time and wear (record-first, Deck Wear is the hero). Junk Drawer is about selection and rearrangement (load-first, the open drawer with its regions is the hero).
 - **Tape wear stays out.** DriftLooper owns that identity.
 - **Playback happens only on steps.** No MIDI note triggering.
@@ -36,7 +36,7 @@ Step-lane engine, LFO engine, file loading, DAW recording pipeline. Pull these i
 ## Staged build
 
 ### Stage 1: Foundation
-- Eight-drawer shell: closed drawers show a label and a tiny level meter; one drawer open at a time.
+- Plugin shell with four pages (Drawer, LFOs, Master, Matrix) and the shared header (FFA logo, preset bar, BPM, Host sync, Reduce motion, Settings).
 - Shared engine module from DriftLooper.
 - Load audio per track by drag and drop or a Browse button (WAV, AIFF, FLAC, MP3).
 - Waveform display; resample on load to the session rate.
@@ -68,13 +68,14 @@ Step-lane engine, LFO engine, file loading, DAW recording pipeline. Pull these i
 - Six LFOs: sine, triangle, saw, square, sample and hold, smooth random, plus a slow "drift" shape.
 - Rate (free or tempo-synced, including dotted and triplet), depth, phase, polarity, restart mode.
 - Each LFO can be global or per-track. LFO-to-LFO modulation allowed.
-- Many-to-many assignments, drawn as rubber bands from LFO to control, with thickness for amount.
-- Mod matrix view listing every assignment.
+- Many-to-many assignments. Pick an LFO (L1-L6) on the LFOs page, click any control, drag up or down to set the amount. Amount is always per target. Assigned controls show a small badge.
+- LFO scope: **Global** = one shared instance for the whole plugin, same phase everywhere; **Per track** = every track runs its own copy with shared settings but independent phase. Restart: global follows the transport/bar, per-track follows that track's loop. Master and FX targets are always global.
+- Matrix page listing every assignment (target, LFO, amount, polarity) with edit and clear.
 - LFOs update at control rate to stay cheap.
 
-### Stage 6: The Countertop (master section)
-- Master volume, pan, global pitch offset, global step length/rate, swing, width/mono.
-- Simple fixed-order effects: filter, delay, small reverb, soft clipper or limiter.
+### Stage 6: Master page
+- Master volume, pan, pitch (range +/-12, 24 or 48 semitones), **Rate** (0.25x to 4x on a log scale, 1.00x at center; scales step speed only, never pitch; in Sync mode it snaps to 1/4x, 1/2x, 1x, 2x, 4x), swing, width, output meter.
+- Simple fixed-order effects, each a card with On/Bypass and a mode: Filter (low/band/high pass, notch; cutoff, reso, drive, mix, slope), Delay (free/sync/dotted/triplet; time, feedback, tone, mix, mono or ping-pong), Reverb (room/hall/plate/spring; size, decay, damping, mix, pre-delay), Limiter (soft/hard; ceiling, release, input, mix, lookahead). A bypassed effect uses no CPU.
 - Per-track sends to delay and reverb.
 - Master and per-track meters; per-track mute, solo, pan, and output routing to separate outs.
 
@@ -101,15 +102,21 @@ Step-lane engine, LFO engine, file loading, DAW recording pipeline. Pull these i
 
 ## UI and animation
 
-**Layout**
-- Eight stacked drawer fronts; click one to slide it open.
-- Open drawer: the sample as a long waveform tray with 4-6 colorful objects (key, button, spool, rubber band, battery, bottle cap) sitting on it. Each object is a region; drag its edges to set start and end.
-- Step lane underneath as a row of small compartments. Drag an object into a compartment to place it.
-- Clicking an object opens a small tag with its region controls.
-- Countertop above the drawers holds the master controls, effects, and meters.
+**Layout (1280 x 900 reference)**
+- One top-down junk drawer on a counter. Header on the counter: FFA logo and name, page tabs (Drawer, LFOs, Master, Matrix), preset bar, BPM, Host sync, Reduce motion, Settings.
+- **Drawer page.** Front board strip: Output (Volume and meter), effect on/off pills, six LFO tiles. Left: eight track compartments (badge, name card, M/S, step dots, meter). Open track: shelf-paper liner with file strip (name, filename, Browse, Record, Normalize), waveform sheet with 4-6 region boxes showing object photos, lane tabs (Region, Volume, Pitch, Ratchet, Direction, Length, Prob., Timing), 16-step organizer with photo chips, and a volume strip. Region tag on the right: Pitch, Gain, Pan, Cutoff, Reso, Drive, Start/End, One-shot/Loop/Ping-pong, Reverse, Snap to hit, and ADSR knobs. Lower compartment: pattern tools (Randomize, Mutate), Catch Last, and the brass FFA nameplate.
+- **LFOs page.** Six panels (L1-L6): shape (Sine, Tri, Saw, Sq, S+H, Rand, Drift), Global or Per track, scope display, Rate, Depth, Phase, Fade in, Free/Sync/Dotted/Triplet, Uni/Bi, and a "Hooked up" chip row.
+- **Master page.** Master panel (six knobs, stereo meter, pitch range, rate mode) plus four effect cards.
+- **Matrix page.** Table of every assignment. (Mockup still to do.)
+- **Recording panel.** Input picker, level meter, arm, sync and length, cap per track. (Mockup still to do.)
+
+**Style rules**
+- Real photographed wood and objects; turned-wood knobs with a dark tick; brass fittings; dark panels with light text for the top strips.
+- Nothing below 11 px text. No overlapping or crowded text; check with real fonts and with wider fallback fonts.
+- Every control, including the ADSR knobs, takes an LFO.
 
 **Vocabulary (tooltips and empty states only)**
-- Tracks are drawers, regions are objects, steps are compartments, LFOs are rubber bands, master section is the countertop, presets are drawers.
+- Presets are drawers, regions are objects, steps are compartments, LFOs are rubber bands. These words appear only in tooltips and empty states.
 - Randomize is Rummage. Mutate is Shake the drawer. Record is Catch something.
 - Empty drawer: "Nothing in here yet. Drop something in."
 - Pattern saved: "Put it back where you found it."
@@ -127,4 +134,6 @@ Step-lane engine, LFO engine, file loading, DAW recording pipeline. Pull these i
 - **Trademark:** look up the two JunkDrawer, Inc. filings (USPTO serials 85631196 and 85703662) to see if they are live. Search software classes for "Junk Drawer," check domain and Gumroad availability, and consider branding as "Junk Drawer by Fading Fractal Audio." A quick attorney check before release is wise.
 - **Selling:** Gumroad is the leading option; licensing and activation still undecided (same as DriftLooper).
 - **Maximum recording length per track:** decide a cap (60 seconds suggested).
-- **UI mockups:** draft the open-drawer screen and approve it before building.
+- **UI mockups:** Drawer, LFOs and Master pages approved. Matrix page and Recording panel still to mock up. Published mockup: https://claude.ai/artifact/P7UF5UvDgqiwu8omARZ13H
+- **Fade vs ADSR:** the old Fade control was removed; ADSR replaces it.
+- **Plugin format:** Windows VST3 plus Standalone first, built with JUCE like DriftLooper.
