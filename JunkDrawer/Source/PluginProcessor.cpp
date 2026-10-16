@@ -818,6 +818,13 @@ bool JunkDrawerProcessor::matchTrackToKey (int track)
     return true;
 }
 
+int JunkDrawerProcessor::matchAllToKey()
+{
+    int n = 0;
+    for (int t = 0; t < jd::kTracks; ++t) if (matchTrackToKey (t)) ++n;       // one-shot: every Tune stays free to change afterwards
+    return n;
+}
+
 bool JunkDrawerProcessor::tuneRegionToKey (int track, int region)
 {
     const auto p = regionPitch (track, region);

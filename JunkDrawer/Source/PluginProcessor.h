@@ -72,6 +72,7 @@ public:
     int projectRoot() const { return juce::roundToInt (state.getRawParameterValue ("key_root")->load()); }
     int projectMode() const { return juce::roundToInt (state.getRawParameterValue ("key_mode")->load()); }
     jd::PitchResult regionPitch (int track, int region) const;       // the note a region holds (message thread)
+    int  matchAllToKey();                                            // Match on every track that has a key; returns how many were set
     bool matchTrackToKey (int track);                                // sets the track's Tune so its key lands in the project key
     bool tuneRegionToKey (int track, int region);                    // sets the region's Pitch so its note lands on the nearest note of the project key
 

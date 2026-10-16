@@ -768,6 +768,19 @@ int main()
         check (proc.matchTrackToKey (5), "a track with a key can be matched");
         const float tune = proc.state.getRawParameterValue ("t6_tune")->load();
         check (std::abs (tune - (float) jd::matchShift (td->key, 0, 1)) < 0.01f && std::abs (tune) <= 6.f, "its Tune becomes the shift into C major");
+        {
+            auto d2 = std::make_shared<jd::TrackData>(); d2->audio.makeCopyOf (aMinor); d2->sampleRate = sr; d2->name = "am";
+            d2->key = jd::detectKey (d2->audio, sr);
+            proc.setTrackAudio (6, d2);
+            setP (proc, "t6_tune", 0.f); setP (proc, "t7_tune", 0.f);
+            check (proc.matchAllToKey() == 2, "Match all sets every track that has a key");
+            const float a = proc.state.getRawParameterValue ("t6_tune")->load(), b = proc.state.getRawParameterValue ("t7_tune")->load();
+            check (std::abs (a - (float) jd::matchShift (td->key, 0, 1)) < 0.01f && std::abs (b - (float) jd::matchShift (d2->key, 0, 1)) < 0.01f, "each by its own amount");
+            setP (proc, "t6_tune", 5.f);
+            check (std::abs (proc.state.getRawParameterValue ("t6_tune")->load() - 5.f) < 0.01f, "and a track can be changed by hand afterwards");
+            setP (proc, "t7_tune", 0.f);
+            proc.setTrackAudio (6, nullptr);
+        }
         proc.setTrackAudio (5, nullptr);
 
         auto note = std::make_shared<jd::TrackData>();

@@ -922,6 +922,15 @@ struct Liner : juce::Component, juce::FileDragAndDropTarget
         keyBtn.setTooltip ("The project key. Match and Tune work towards it. Pick No key to tune to the nearest note only.");
         matchBtn.setButtonText ("Match");
         matchBtn.setTooltip ("Shift this whole track into the project key. It sets the track's Tune from the key found in the sound.");
+        matchAllBtn.setButtonText ("Match all");
+        matchAllBtn.setTooltip ("Set every track's Tune so its key lands in the project key. It is a one-time shift: you can still change any track afterwards.");
+        matchAllBtn.onClick = [this]
+        {
+            const int n = proc.matchAllToKey();
+            message = n == 0 ? "No track has a key to match yet." : juce::String (n) + (n == 1 ? " track" : " tracks") + " tuned to the project key.";
+            repaint();
+        };
+        addAndMakeVisible (matchAllBtn);
         keyBtn.onClick = [this] { openKeyMenu(); };
         matchBtn.onClick = [this] { proc.matchTrackToKey (track); repaint(); };
         addAndMakeVisible (keyBtn); addAndMakeVisible (matchBtn);
@@ -1033,7 +1042,7 @@ struct Liner : juce::Component, juce::FileDragAndDropTarget
         if (selected >= regionCount()) pick (regionCount() - 1);
         if (loaded && tag == nullptr) buildTag();
         if (! loaded) tag.reset();
-        for (auto* c : std::initializer_list<juce::Component*> { &wave, &grid, &clear, &less, &more, &tabs[0], &tabs[1], &tabs[2], &tabs[3], &tabs[4], &tabs[5], &keyBtn, &matchBtn, tuneKnob.get() })
+        for (auto* c : std::initializer_list<juce::Component*> { &wave, &grid, &clear, &less, &more, &tabs[0], &tabs[1], &tabs[2], &tabs[3], &tabs[4], &tabs[5], &keyBtn, &matchBtn, &matchAllBtn, tuneKnob.get() })
             if (c != nullptr) c->setVisible (loaded);
         keyBtn.setButtonText (keyButtonText());
         matchBtn.setEnabled (loaded && proc.trackKey (track).found);
@@ -1054,7 +1063,8 @@ struct Liner : juce::Component, juce::FileDragAndDropTarget
         clear.setBounds (16 + 656 - 56, 12, 56, 28);
         browse.setBounds (loaded ? 16 + 656 - 56 - 8 - 64 : getWidth() / 2 - 128, loaded ? 12 : 268, loaded ? 64 : 120, 28);
         record.setBounds (loaded ? 16 + 656 - 56 - 8 - 64 - 8 - 64 : getWidth() / 2 + 8, loaded ? 12 : 268, loaded ? 64 : 120, 28);
-        keyBtn.setBounds (292, 6, 172, 24);
+        keyBtn.setBounds (292, 6, 104, 24);
+        matchAllBtn.setBounds (402, 6, 62, 24);
         matchBtn.setBounds (292, 32, 58, 22);
         if (tuneKnob != nullptr) tuneKnob->setBounds (356, 30, 30, 26);
         wave.setBounds (16, 56, 656, 204);
@@ -1077,7 +1087,7 @@ struct Liner : juce::Component, juce::FileDragAndDropTarget
         g.setColour (juce::Colour (0x99281608));
         g.drawRect (r, 1.f);
 
-        padBehind (g, { &keyBtn, &matchBtn, &browse, &record, &clear, &tabs[0], &tabs[1], &tabs[2], &tabs[3], &tabs[4], &tabs[5], &less, &more });
+        padBehind (g, { &keyBtn, &matchAllBtn, &matchBtn, &browse, &record, &clear, &tabs[0], &tabs[1], &tabs[2], &tabs[3], &tabs[4], &tabs[5], &less, &more });
 
         auto td = proc.getTrack (track);
         if (td == nullptr && ! recOpen)
@@ -1131,7 +1141,7 @@ struct Liner : juce::Component, juce::FileDragAndDropTarget
     StepGrid grid;
     std::unique_ptr<RegionTag> tag;
     std::array<juce::TextButton, jd::kLanes> tabs;
-    juce::TextButton browse, clear, record, less, more, keyBtn, matchBtn;
+    juce::TextButton browse, clear, record, less, more, keyBtn, matchBtn, matchAllBtn;
     std::unique_ptr<Knob> tuneKnob;
     std::unique_ptr<Watch> wTune, wRoot, wMode;
     RecPanel rec;
