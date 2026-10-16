@@ -100,7 +100,11 @@ Step-lane engine, LFO engine, file loading, DAW recording pipeline. Pull these i
 - Defaults reproduce DriftLooper's: 4 passes, 96 kHz, 24-bit WAV, cut, master mix.
 - A long export is a real offline render with the same engine as live playback: LFOs, sequencer and effects keep moving the whole way (LFOs start from the beginning of their cycle, as on a fresh start). Memory does not grow with length (fixed-size blocks).
 - The window shows the estimated size of each file and of all files (FLAC is an estimate) and refuses to start when the drive does not have room.
-- Folder: the first export lets you choose a folder or have one assigned temporarily; every export makes its own dated sub-folder; CHANGE... reassigns it. Export settings and the folder are remembered per computer (settings.xml under Fading Fractal Audio), not automatable parameters. Result files can be dragged into a DAW.
+- Export folder, same flow as DriftLooper (mockup: "Export: first time" board). Stored per computer in settings.xml, mode 0 = not asked yet, 1 = automatic (temporary folder), 2 = a folder you chose.
+  - The first time Export is pressed with nothing chosen, a prompt asks "Where should exports go?" with CHOOSE A FOLDER... (opens the system folder picker, starting in Documents) or AUTO-ASSIGN (TEMPORARY FOLDER). Nothing renders until one is picked.
+  - The Export window's folder line reads the chosen path, or "Automatic - a temporary folder (cleared by your system now and then)", or "Not chosen yet". CHANGE... opens a small menu: Choose a folder..., Auto-assign (temporary folder), Show the current folder.
+  - Every export goes into its own dated sub-folder ("Junk Drawer Export 2026-10-15 21-52-00"). If a chosen folder has gone missing and cannot be recreated, the window says so and opens the picker again.
+  - Export settings are Export-window settings, not automatable parameters. Result files can be dragged into a DAW.
 - Tests: all file type x bit depth x rate combinations read back correctly (format, length, level, size estimate); bars/time lengths and the 30 minute cap; fade reaches silence without clicks; ring-out keeps tails and ends in silence; 16-bit dither error about 0.7 of a 16-bit step; disk-space refusal; options saved and restored; stems sum to the master mix; LFOs keep moving across a long export.
 
 ### Stage 8: Polish
