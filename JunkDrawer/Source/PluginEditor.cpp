@@ -1,5 +1,6 @@
 #include "PluginEditor.h"
 #include <BinaryData.h>
+#include <map>
 
 using namespace ui;
 using APVTS = juce::AudioProcessorValueTreeState;
@@ -61,10 +62,65 @@ struct Watch
 
 juce::String hookedNone() { return "Nothing attached yet."; }
 
-void drawHookedRow (juce::Graphics& g, int x, int y)
+// "Track 3 · Cutoff" and "Region B"-style names for a control, from its parameter ID.
+std::pair<juce::String, juce::String> describeTarget (APVTS& s, const juce::String& id)
+{
+    static const std::map<juce::String, juce::String> region { { "start", "Start" }, { "end", "End" }, { "pitch", "Pitch" }, { "gain", "Gain" }, { "pan", "Pan" }, { "cutoff", "Cutoff" },
+                                                               { "reso", "Reso" }, { "drive", "Drive" }, { "attack", "Attack" }, { "decay", "Decay" }, { "sustain", "Sustain" }, { "release", "Release" } };
+    const auto dot = juce::String::charToString (0x00b7);
+    auto paramName = [&] { return s.getParameter (id) != nullptr ? s.getParameter (id)->getName (64) : id; };
+    if (id.startsWithChar ('t') && juce::CharacterFunctions::isDigit (id[1]))
+    {
+        const int track = id.substring (1).getIntValue();
+        const auto rest = id.fromFirstOccurrenceOf ("_", false, false);
+        if (rest.startsWithChar ('r') && juce::CharacterFunctions::isDigit (rest[1]))
+        {
+            const int r = rest.substring (1).getIntValue();
+            const auto what = rest.fromFirstOccurrenceOf ("_", false, false);
+            const auto it = region.find (what);
+            return { "Track " + juce::String (track) + " " + dot + " " + (it != region.end() ? it->second : what), "Region " + juce::String::charToString ((juce::juce_wchar) ('A' + juce::jlimit (0, 5, r - 1))) };
+        }
+        return { "Track " + juce::String (track) + " " + dot + " " + (rest == "level" ? "Level" : (rest == "pan" ? "Pan" : rest)), "Track" };
+    }
+    if (id.startsWith ("m_"))  return { "Master " + dot + " " + paramName(), "Master page" };
+    if (id.startsWith ("fx_"))
+    {
+        const auto fx = id.fromFirstOccurrenceOf ("_", false, false).upToFirstOccurrenceOf ("_", false, false);
+        const juce::String names[] = { "Filter", "Delay", "Reverb", "Limiter" };
+        const char* keys[] = { "filter", "delay", "reverb", "lim" };
+        for (int i = 0; i < 4; ++i) if (fx == keys[i]) return { names[i] + " " + dot + " " + paramName(), "Master page, effect" };
+    }
+    if (id.startsWithChar ('l') && juce::CharacterFunctions::isDigit (id[1]))
+    {
+        const auto what = id.fromFirstOccurrenceOf ("_", false, false);
+        const juce::String nice = what == "rate" ? "Rate" : (what == "depth" ? "Depth" : (what == "phase" ? "Phase" : (what == "fade" ? "Fade in" : what)));
+        return { "LFO " + juce::String (id.substring (1).getIntValue()) + " " + dot + " " + nice, "LFOs page" };
+    }
+    return { paramName(), "" };
+}
+
+// "HOOKED UP" and a chip for each link that matches; "Nothing attached yet." when none do.
+void drawHooked (juce::Graphics& g, int x, int y, int width, const std::function<bool (const LinkInfo&)>& match, const std::function<juce::String (const LinkInfo&)>& label)
 {
     drawText (g, "HOOKED UP", { x, y, 80, 24 }, sans (11.f, true).withExtraKerningFactor (0.12f), pal::textDim);
-    drawText (g, hookedNone(), { x + 88, y, 220, 24 }, mono (11.f), pal::textDim);
+    std::vector<LinkInfo> mine;
+    if (auto* c = currentMod()) for (auto& l : c->links()) if (match (l)) mine.push_back (l);
+    if (mine.empty()) { drawText (g, hookedNone(), { x + 88, y, 220, 24 }, mono (11.f), pal::textDim); return; }
+    int cx = x + 88;
+    for (size_t i = 0; i < mine.size(); ++i)
+    {
+        const auto t = label (mine[i]);
+        const int w = chipWidth (t);
+        const bool last = i + 1 == mine.size();
+        const int more = (int) (mine.size() - i);
+        if (cx + w + (last ? 0 : 40) > x + width)
+        {
+            drawChip (g, { cx, y + 1, chipWidth ("+" + juce::String (more)), 22 }, "+" + juce::String (more));
+            return;
+        }
+        drawChip (g, { cx, y + 1, w, 22 }, t);
+        cx += w + 6;
+    }
 }
 
 void drawStripLabel (juce::Graphics& g, const juce::String& t, int x, int y)
@@ -75,10 +131,11 @@ void drawStripLabel (juce::Graphics& g, const juce::String& t, int x, int y)
 
 //==============================================================================
 // Header: logo, name, page tabs, preset bar, host tempo, Reduce motion
-struct JunkDrawerEditor::Header : juce::Component, juce::Timer
+struct JunkDrawerEditor::Header : juce::Component, juce::Timer, juce::ChangeListener
 {
     Header (JunkDrawerEditor& e) : ed (e)
     {
+        ed.proc.addChangeListener (this);
         const char* names[] = { "Drawer", "LFOs", "Master", "Matrix" };
         const char* tips[]  = { "The main drawer", "The six LFOs", "Master and effects", "Everything that is hooked up" };
         for (int i = 0; i < NumPages; ++i)
@@ -101,6 +158,8 @@ struct JunkDrawerEditor::Header : juce::Component, juce::Timer
         startTimerHz (4);
     }
 
+    ~Header() override { ed.proc.removeChangeListener (this); }
+    void changeListenerCallback (juce::ChangeBroadcaster*) override { repaint (bpmArea()); }
     void select (int i) { tabs[(size_t) i].setToggleState (true, juce::dontSendNotification); }
 
     void resized() override
@@ -136,7 +195,14 @@ struct JunkDrawerEditor::Header : juce::Component, juce::Timer
         drawText (g, juce::String::charToString (0x203a), bar.toNearestInt().removeFromRight (30), sans (16.f), pal::amber.withAlpha (0.4f), juce::Justification::centred);
         drawText (g, juce::String ("Drawer 001 ") + juce::String::charToString (0x00b7) + " Empty drawer", bar.toNearestInt().reduced (32, 0), serif (15.f, false), pal::text, juce::Justification::centred);
 
-        drawText (g, bpm > 0.0 ? juce::String (bpm, 1) + " BPM" : juce::String ("No host tempo"), bpmArea(), mono (12.f), pal::amber, juce::Justification::centredRight);
+        if (ed.proc.armedLfo() >= 0)
+        {
+            const auto pill = bpmArea().withTrimmedLeft (-8).withTrimmedRight (-4);
+            g.setColour (pal::amber); g.fillRoundedRectangle (pill.toFloat(), 14.f);
+            drawText (g, "Assigning L" + juce::String (ed.proc.armedLfo() + 1), pill, sans (12.f, true), pal::amberInk, juce::Justification::centred);
+        }
+        else
+            drawText (g, bpm > 0.0 ? juce::String (bpm, 1) + " BPM" : juce::String ("No host tempo"), bpmArea(), mono (12.f), pal::amber, juce::Justification::centredRight);
     }
 
     JunkDrawerEditor& ed;
@@ -825,17 +891,19 @@ struct JunkDrawerEditor::DrawerPage : juce::Component, juce::ChangeListener
 {
     struct LfoTile : juce::Component, juce::SettableTooltipClient
     {
-        LfoTile (APVTS& s, int i) : index (i), state (s), wShape (s, jd::lfoId (i, "shape"), *this), wRate (s, jd::lfoId (i, "rate"), *this),
-                                    wDiv (s, jd::lfoId (i, "div"), *this), wSync (s, jd::lfoId (i, "sync"), *this)
-        { setTooltip ("LFO " + juce::String (i + 1)); }
+        LfoTile (JunkDrawerProcessor& p, int i) : index (i), proc (p), state (p.state), wShape (p.state, jd::lfoId (i, "shape"), *this), wRate (p.state, jd::lfoId (i, "rate"), *this),
+                                    wDiv (p.state, jd::lfoId (i, "div"), *this), wSync (p.state, jd::lfoId (i, "sync"), *this)
+        { setTooltip ("LFO " + juce::String (i + 1) + ". Click to start assigning it: then drag any knob up or down to set how much this LFO moves it. Click again to stop."); }
+        void mouseDown (const juce::MouseEvent&) override { proc.setArmedLfo (proc.armedLfo() == index ? -1 : index); }
 
         void paint (juce::Graphics& g) override
         {
             auto r = getLocalBounds().toFloat();
             g.setColour (juce::Colours::white.withAlpha (0.05f));
             g.fillRoundedRectangle (r, 4.f);
-            g.setColour (pal::line.withAlpha (0.8f));
-            g.drawRoundedRectangle (r.reduced (0.5f), 4.f, 1.f);
+            const bool armed = proc.armedLfo() == index;
+            g.setColour (armed ? pal::amber : pal::line.withAlpha (0.8f));
+            g.drawRoundedRectangle (r.reduced (0.5f), 4.f, armed ? 2.f : 1.f);
 
             const int shape = juce::roundToInt (state.getRawParameterValue (jd::lfoId (index, "shape"))->load());
             const int sync  = juce::roundToInt (state.getRawParameterValue (jd::lfoId (index, "sync"))->load());
@@ -852,6 +920,7 @@ struct JunkDrawerEditor::DrawerPage : juce::Component, juce::ChangeListener
         }
 
         int index;
+        JunkDrawerProcessor& proc;
         APVTS& state;
         Watch wShape, wRate, wDiv, wSync;
     };
@@ -926,7 +995,7 @@ struct JunkDrawerEditor::DrawerPage : juce::Component, juce::ChangeListener
             addAndMakeVisible (pills[(size_t) i]);
             pillAtt[(size_t) i] = std::make_unique<juce::ButtonParameterAttachment> (*st.getParameter (fxIds[i]), pills[(size_t) i], nullptr);
         }
-        for (int i = 0; i < jd::kLfos; ++i) { tiles[(size_t) i] = std::make_unique<LfoTile> (st, i); addAndMakeVisible (*tiles[(size_t) i]); }
+        for (int i = 0; i < jd::kLfos; ++i) { tiles[(size_t) i] = std::make_unique<LfoTile> (ed.proc, i); addAndMakeVisible (*tiles[(size_t) i]); }
         for (int t = 0; t < jd::kTracks; ++t) { rows[(size_t) t] = std::make_unique<TrackRow> (ed.proc, t); rows[(size_t) t]->onPick = [this] (int i) { pickTrack (i); }; addAndMakeVisible (*rows[(size_t) t]); }
         liner = std::make_unique<Liner> (ed.proc);
         addAndMakeVisible (*liner);
@@ -948,6 +1017,7 @@ struct JunkDrawerEditor::DrawerPage : juce::Component, juce::ChangeListener
     void changeListenerCallback (juce::ChangeBroadcaster*) override
     {
         for (auto& r : rows) r->repaint();
+        for (auto& t : tiles) t->repaint();
         liner->refresh();
     }
 
@@ -992,7 +1062,7 @@ struct JunkDrawerEditor::DrawerPage : juce::Component, juce::ChangeListener
 
 //==============================================================================
 // LFO page
-struct JunkDrawerEditor::LfoPage : juce::Component
+struct JunkDrawerEditor::LfoPage : juce::Component, juce::ChangeListener
 {
     struct LfoPanel : Panel
     {
@@ -1031,7 +1101,7 @@ struct JunkDrawerEditor::LfoPage : juce::Component
             g.setColour (pal::amber);
             g.strokePath (lfoPath (shape, sc.getWidth(), sc.getHeight()), juce::PathStrokeType (2.f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded),
                           juce::AffineTransform::translation (sc.getX(), sc.getY()));
-            drawHookedRow (g, 14, 296);
+            drawHooked (g, 14, 296, getWidth() - 28, [this] (const LinkInfo& l) { return l.lfo == index; }, [] (const LinkInfo& l) { return l.name; });
         }
         int index;
         APVTS& state;
@@ -1047,18 +1117,26 @@ struct JunkDrawerEditor::LfoPage : juce::Component
             auto& b = picks[(size_t) i];
             b.setButtonText ("L" + juce::String (i + 1));
             b.setClickingTogglesState (true);
-            b.setRadioGroupId (202);
+            b.setTooltip ("Click to start assigning this LFO, then drag any knob up or down to set how much it moves it. Click again to stop.");
+            b.onClick = [this, i] { ed.proc.setArmedLfo (ed.proc.armedLfo() == i ? -1 : i); };
             addAndMakeVisible (b);
             panels[(size_t) i] = std::make_unique<LfoPanel> (ed.proc.state, i);
             addAndMakeVisible (*panels[(size_t) i]);
         }
-        picks[2].setToggleState (true, juce::dontSendNotification);
         matrix.setButtonText ("Mod matrix");
         matrix.onClick = [this] { ed.showPage (Matrix); };
         clear.setButtonText ("Clear all");
         clear.setTooltip ("Take every LFO off");
-        clear.setEnabled (false);
+        clear.onClick = [this] { ed.proc.clearMods(); };
         addAndMakeVisible (matrix); addAndMakeVisible (clear);
+        ed.proc.addChangeListener (this);
+        changeListenerCallback (nullptr);
+    }
+    ~LfoPage() override { ed.proc.removeChangeListener (this); }
+    void changeListenerCallback (juce::ChangeBroadcaster*) override
+    {
+        for (int i = 0; i < jd::kLfos; ++i) picks[(size_t) i].setToggleState (ed.proc.armedLfo() == i, juce::dontSendNotification);
+        clear.setEnabled (! ed.proc.getMods().empty());
     }
 
     void resized() override
@@ -1084,7 +1162,7 @@ struct JunkDrawerEditor::LfoPage : juce::Component
         g.setColour (pal::line); g.fillRect (390, 24, 1, 56);
         g.setColour (pal::textSoft);
         g.setFont (sans (12.f));
-        g.drawFittedText ("Pick an LFO, click any control on the Drawer page, then drag up or down to set the amount.", { 410, 28, 440, 52 }, juce::Justification::centredLeft, 3, 1.f);
+        g.drawFittedText ("Pick an LFO, then drag any knob on any page up or down to set the amount. Pick it again to stop.", { 410, 28, 440, 52 }, juce::Justification::centredLeft, 3, 1.f);
     }
 
     JunkDrawerEditor& ed;
@@ -1210,7 +1288,9 @@ struct JunkDrawerEditor::MasterPage : juce::Component
             g.strokePath (p, juce::PathStrokeType (2.f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded), juce::AffineTransform::translation (vz.getX(), vz.getY()));
 
             drawText (g, cfg.optLabel, { 14, 262, 120, 24 }, sans (11.f, true).withExtraKerningFactor (0.12f), pal::textDim);
-            drawHookedRow (g, 14, 296);
+            const juce::String prefix = juce::String (cfg.on).upToLastOccurrenceOf ("_on", false, false) + "_";
+            drawHooked (g, 14, 296, getWidth() - 28, [prefix] (const LinkInfo& l) { return l.target.startsWith (prefix); },
+                        [] (const LinkInfo& l) { return "L" + juce::String (l.lfo + 1) + " " + l.name.fromLastOccurrenceOf (" " + juce::String::charToString (0x00b7) + " ", false, false); });
         }
 
         Cfg cfg;
@@ -1284,7 +1364,8 @@ struct JunkDrawerEditor::MasterPage : juce::Component
             g.fillRect (14, 520, getWidth() - 28, 1);
             drawText (g, "PITCH RANGE", { 14, 536, 140, 24 }, sans (11.f, true).withExtraKerningFactor (0.12f), pal::textDim);
             drawText (g, "RATE", { 14, 576, 140, 24 }, sans (11.f, true).withExtraKerningFactor (0.12f), pal::textDim);
-            drawHookedRow (g, 14, 640);
+            drawHooked (g, 14, 640, getWidth() - 28, [] (const LinkInfo& l) { return l.target.startsWith ("m_"); },
+                        [] (const LinkInfo& l) { return "L" + juce::String (l.lfo + 1) + " " + l.name.fromLastOccurrenceOf (" " + juce::String::charToString (0x00b7) + " ", false, false); });
         }
         JunkDrawerProcessor& proc;
         std::unique_ptr<Seg> range, rate;
@@ -1352,9 +1433,123 @@ struct JunkDrawerEditor::MasterPage : juce::Component
 
 //==============================================================================
 // Matrix page (empty until the LFO engine and assignments exist)
-struct JunkDrawerEditor::MatrixPage : juce::Component
+struct JunkDrawerEditor::MatrixPage : juce::Component, juce::ChangeListener
 {
-    explicit MatrixPage (JunkDrawerEditor&) {}
+    // The table of every link: target, LFO, amount bar (drag it), polarity and a cross to clear.
+    struct Table : juce::Component
+    {
+        explicit Table (MatrixPage& m) : owner (m) {}
+        static constexpr int rowH = 44, barX = 478, barW = 168;
+
+        std::vector<LinkInfo> rows() const
+        {
+            std::vector<LinkInfo> out;
+            if (auto* c = currentMod()) for (auto& l : c->links()) if (owner.filter < 0 || l.lfo == owner.filter) out.push_back (l);
+            return out;
+        }
+
+        void paint (juce::Graphics& g) override
+        {
+            const auto list = rows();
+            if (list.empty())
+            {
+                drawText (g, hookedNone(), getLocalBounds().withHeight (60).withY (150), serif (22.f, false), pal::textSoft, juce::Justification::centred);
+                drawText (g, "Pick an LFO, then drag any knob up or down.", getLocalBounds().withHeight (24).withY (214), sans (13.f), pal::textDim, juce::Justification::centred);
+                return;
+            }
+            auto& state = owner.ed.proc.state;
+            for (size_t i = 0; i < list.size() && (int) i * rowH < getHeight(); ++i)
+            {
+                const auto& l = list[i];
+                const int y = (int) i * rowH;
+                g.setColour (juce::Colour (0x1af0e2c4)); g.fillRect (0, y + rowH - 1, getWidth(), 1);
+                drawText (g, l.name, { 0, y + 4, 306, 20 }, sans (13.f, true), pal::text);
+                drawText (g, l.where, { 0, y + 23, 306, 16 }, sans (11.f), pal::textDim);
+                drawChip (g, { 316, y + 11, 40, 22 }, "L" + juce::String (l.lfo + 1));
+                const bool perTrack = state.getRawParameterValue (jd::lfoId (l.lfo, "global"))->load() < 0.5f && l.target.startsWithChar ('t') && juce::CharacterFunctions::isDigit (l.target[1]);
+                drawText (g, perTrack ? "Per track" : "Global", { 364, y + 11, 100, 22 }, sans (11.f), pal::textSoft);
+
+                const juce::Rectangle<float> bar ((float) barX, (float) y + 17.f, (float) barW, 10.f);
+                g.setColour (juce::Colour (0x80000000)); g.fillRoundedRectangle (bar, 5.f);
+                g.setColour (pal::line); g.drawRoundedRectangle (bar.reduced (0.5f), 5.f, 1.f);
+                const float half = bar.getWidth() * 0.5f, w = std::abs (l.amount) * half;
+                g.setColour (pal::amber);
+                g.fillRoundedRectangle (l.amount >= 0.f ? bar.getCentreX() : bar.getCentreX() - w, bar.getY(), juce::jmax (2.f, w), bar.getHeight(), 5.f);
+                g.setColour (pal::textDim); g.fillRect (bar.getCentreX() - 1.f, bar.getY() - 3.f, 2.f, bar.getHeight() + 6.f);
+                const int pct = juce::roundToInt (l.amount * 100.f);
+                drawText (g, (pct > 0 ? "+" : "") + juce::String (pct) + "%", { barX + barW + 8, y + 11, 56, 22 }, mono (12.f), pal::amber, juce::Justification::centredRight);
+                drawText (g, juce::roundToInt (state.getRawParameterValue (jd::lfoId (l.lfo, "polar"))->load()) == 0 ? "Uni" : "Bi", { 740, y + 11, 50, 22 }, mono (11.f), pal::textSoft);
+
+                const juce::Rectangle<float> x ((float) getWidth() - 28.f, (float) y + 9.f, 26.f, 26.f);
+                g.setColour (pal::line); g.drawEllipse (x.reduced (0.5f), 1.f);
+                g.setColour (pal::text);
+                g.drawLine (x.getX() + 9.f, x.getY() + 9.f, x.getRight() - 9.f, x.getBottom() - 9.f, 1.6f);
+                g.drawLine (x.getRight() - 9.f, x.getY() + 9.f, x.getX() + 9.f, x.getBottom() - 9.f, 1.6f);
+            }
+        }
+
+        void mouseDown (const juce::MouseEvent& e) override
+        {
+            const auto list = rows();
+            const int i = e.y / rowH;
+            if (i < 0 || i >= (int) list.size()) return;
+            dragRow = -1;
+            if (e.x >= getWidth() - 32) { owner.ed.proc.removeMod (list[(size_t) i].target, list[(size_t) i].lfo); return; }
+            if (e.x >= barX - 8 && e.x <= barX + barW + 8) { dragRow = i; setFromX (list[(size_t) i], e.x); }
+        }
+        void mouseDrag (const juce::MouseEvent& e) override
+        {
+            const auto list = rows();
+            if (dragRow >= 0 && dragRow < (int) list.size()) setFromX (list[(size_t) dragRow], e.x);
+        }
+        void setFromX (const LinkInfo& l, int x)
+        {
+            const float a = juce::jlimit (-1.f, 1.f, (float) (x - (barX + barW / 2)) / (float) (barW / 2));
+            owner.ed.proc.setMod (l.target, l.lfo, std::round (a * 100.f) / 100.f);
+        }
+
+        MatrixPage& owner;
+        int dragRow = -1;
+    };
+
+    explicit MatrixPage (JunkDrawerEditor& e) : ed (e), table (*this)
+    {
+        const char* names[] = { "All", "L1", "L2", "L3", "L4", "L5", "L6" };
+        for (int i = 0; i < 7; ++i)
+        {
+            auto& b = chips[(size_t) i];
+            b.setButtonText (names[i]);
+            b.setClickingTogglesState (true);
+            b.setRadioGroupId (303);
+            b.onClick = [this, i] { filter = i - 1; table.repaint(); };
+            addAndMakeVisible (b);
+        }
+        chips[0].setToggleState (true, juce::dontSendNotification);
+        clear.setButtonText ("Clear all");
+        clear.setTooltip ("Take every LFO off");
+        clear.onClick = [this] { ed.proc.clearMods(); };
+        addAndMakeVisible (clear);
+        addAndMakeVisible (table);
+        ed.proc.addChangeListener (this);
+        changeListenerCallback (nullptr);
+    }
+    ~MatrixPage() override { ed.proc.removeChangeListener (this); }
+
+    void changeListenerCallback (juce::ChangeBroadcaster*) override
+    {
+        clear.setEnabled (! ed.proc.getMods().empty());
+        table.repaint();
+        repaint();
+    }
+
+    void resized() override
+    {
+        int x = 112;
+        for (int i = 0; i < 7; ++i) { const int w = i == 0 ? 48 : 42; chips[(size_t) i].setBounds (x, 168, w, 26); x += w + 6; }
+        clear.setBounds (1236 - 22 - 98, 37, 98, 30);
+        table.setBounds (58, 234, 864, 528);
+    }
+
     void paint (juce::Graphics& g) override
     {
         paintDrawerFrame (g, false);
@@ -1363,21 +1558,82 @@ struct JunkDrawerEditor::MatrixPage : juce::Component
         g.fillRoundedRectangle (strip, 4.f);
         g.setColour (juce::Colour (0x2effebbe));
         g.drawRoundedRectangle (strip.reduced (0.5f), 4.f, 1.f);
-        drawStripLabel (g, "EVERYTHING THAT IS HOOKED UP", 66, 24);
-        drawText (g, "Mod matrix", { 66, 40, 320, 32 }, serif (22.f), juce::Colour (0xfff6e8c9));
+        drawStripLabel (g, "EVERYTHING HOOKED UP", 66, 24);
+        drawText (g, "Matrix", { 66, 40, 320, 32 }, serif (22.f), juce::Colour (0xfff6e8c9));
+        g.setColour (pal::line); g.fillRect (390, 24, 1, 56);
+        g.setColour (pal::textSoft);
+        g.setFont (sans (12.f));
+        g.drawFittedText ("Every control with an LFO on it, in one list. Drag a bar to change how much, or clear it with the cross.", { 410, 28, 440, 52 }, juce::Justification::centredLeft, 3, 1.f);
 
-        const juce::Rectangle<float> pn (44.f, 122.f, 1192.f, 688.f);
-        g.setColour (pal::panel);
-        g.fillRoundedRectangle (pn, 4.f);
-        g.setColour (juce::Colour (0x29ffebbe));
-        g.drawRoundedRectangle (pn.reduced (0.5f), 4.f, 1.f);
-        const int cols[] = { 70, 520, 700, 900 };
+        const auto links = currentMod() != nullptr ? currentMod()->links() : std::vector<LinkInfo>();
+        auto panel = [&] (juce::Rectangle<float> r)
+        {
+            g.setColour (pal::panel); g.fillRoundedRectangle (r, 4.f);
+            g.setColour (juce::Colour (0x29ffebbe)); g.drawRoundedRectangle (r.reduced (0.5f), 4.f, 1.f);
+        };
+        panel ({ 44.f, 122.f, 892.f, 688.f });
+        drawText (g, "MATRIX", { 58, 134, 200, 24 }, mono (15.f, true), pal::text);
+        drawText (g, juce::String ((int) links.size()) + " hooked up", { 700, 134, 222, 24 }, mono (11.f), pal::amber, juce::Justification::centredRight);
+        drawText (g, "SHOW", { 58, 168, 50, 26 }, sans (11.f, true).withExtraKerningFactor (0.14f), pal::textDim);
         const char* heads[] = { "TARGET", "LFO", "AMOUNT", "POLARITY" };
-        for (int i = 0; i < 4; ++i) drawText (g, heads[i], { cols[i], 140, 200, 20 }, sans (11.f, true).withExtraKerningFactor (0.12f), pal::amber);
-        g.setColour (pal::line); g.fillRect (62, 168, 1156, 1);
-        drawText (g, hookedNone(), { 44, 330, 1192, 40 }, serif (22.f, false), pal::textSoft, juce::Justification::centred);
-        drawText (g, "Pick an LFO on the LFOs page, click a control, then drag up or down.", { 44, 372, 1192, 24 }, sans (13.f), pal::textDim, juce::Justification::centred);
+        const int hx[] = { 58, 374, 536, 798 };
+        for (int i = 0; i < 4; ++i) drawText (g, heads[i], { hx[i], 206, 160, 24 }, sans (11.f, true).withExtraKerningFactor (0.14f), pal::textDim);
+        drawText (g, "CLEAR", { 822, 206, 100, 24 }, sans (11.f, true).withExtraKerningFactor (0.14f), pal::textDim, juce::Justification::centredRight);
+        g.setColour (pal::line); g.fillRect (58, 230, 864, 1);
+        drawText (g, "Amounts run from -100% to +100% of the control's range.", { 58, 774, 864, 24 }, sans (11.f), pal::textDim);
+
+        // the six LFOs
+        panel ({ 948.f, 122.f, 288.f, 338.f });
+        drawText (g, "LFOS", { 962, 134, 200, 24 }, mono (15.f, true), pal::text);
+        static const char* full[] = { "Sine", "Triangle", "Saw", "Square", "Sample and hold", "Smooth random", "Drift" };
+        auto& st = ed.proc.state;
+        for (int i = 0; i < jd::kLfos; ++i)
+        {
+            const int y = 122 + 46 + i * 46;
+            g.setColour (juce::Colour (0x1af0e2c4)); g.fillRect (962, y + 45, 260, 1);
+            drawChip (g, { 962, y + 12, 36, 22 }, "L" + juce::String (i + 1));
+            const int shape = juce::jlimit (0, 6, juce::roundToInt (st.getRawParameterValue (jd::lfoId (i, "shape"))->load()));
+            const int sync = juce::roundToInt (st.getRawParameterValue (jd::lfoId (i, "sync"))->load());
+            const float hz = st.getRawParameterValue (jd::lfoId (i, "rate"))->load();
+            const int div = juce::roundToInt (st.getRawParameterValue (jd::lfoId (i, "div"))->load());
+            const bool global = st.getRawParameterValue (jd::lfoId (i, "global"))->load() > 0.5f;
+            const juce::String rate = sync == 0 ? juce::String (hz, hz < 10.f ? 2 : 1) + " Hz" : jd::kLfoSyncsShort (div, sync);
+            int n = 0;
+            for (auto& l : links) if (l.lfo == i) ++n;
+            drawText (g, full[shape], { 1008, y + 6, 130, 18 }, sans (12.f, true), pal::text);
+            drawText (g, juce::String (global ? "Global" : "Per track") + " " + juce::String::charToString (0x00b7) + " " + rate, { 1008, y + 24, 140, 16 }, sans (11.f), pal::textDim);
+            drawText (g, juce::String (n) + " hooked", { 1140, y + 12, 82, 22 }, mono (11.f), pal::amber, juce::Justification::centredRight);
+        }
+
+        // how to hook one up
+        const juce::Rectangle<float> card (948.f, 474.f, 288.f, 336.f);
+        g.setColour (juce::Colour (0x66000000)); g.fillRoundedRectangle (card.translated (0.f, 4.f), 3.f);
+        g.setColour (juce::Colour (0xfff3ead0)); g.fillRoundedRectangle (card, 3.f);
+        const auto ink = juce::Colour (0xff2a1b10);
+        drawText (g, "HOOK ONE UP", { 968, 492, 248, 16 }, sans (11.f, true).withExtraKerningFactor (0.16f), juce::Colour (0xff5a4329));
+        const char* steps[] = { "Pick an LFO on the LFOs page, or click one in the top strip.", "Drag any knob up or down to set how much it moves.", "It lands in this list. Change the amount here or clear it." };
+        for (int i = 0; i < 3; ++i)
+        {
+            const int y = 524 + i * 52;
+            g.setGradientFill (juce::ColourGradient (juce::Colour (0xfff3dc98), 978.f, (float) y, juce::Colour (0xff8a6528), 996.f, (float) y + 22.f, true));
+            g.fillEllipse (968.f, (float) y, 22.f, 22.f);
+            drawText (g, juce::String (i + 1), { 968, y, 22, 22 }, mono (11.f, true), ink, juce::Justification::centred);
+            g.setFont (sans (12.5f)); g.setColour (ink);
+            g.drawFittedText (steps[i], { 1000, y - 4, 216, 44 }, juce::Justification::centredLeft, 3, 1.f);
+        }
+        if (links.empty())
+        {
+            g.setColour (juce::Colour (0x4d3c2814)); g.fillRect (968, 690, 248, 1);
+            drawText (g, "Nothing attached yet.", { 968, 700, 248, 20 }, mono (12.f), juce::Colour (0xff5a4329));
+            drawText (g, "Pick an LFO and hook it up.", { 968, 722, 248, 20 }, mono (12.f), juce::Colour (0xff5a4329));
+        }
     }
+
+    JunkDrawerEditor& ed;
+    Table table;
+    std::array<juce::TextButton, 7> chips;
+    juce::TextButton clear;
+    int filter = -1;
 };
 
 //==============================================================================
@@ -1386,6 +1642,9 @@ JunkDrawerEditor::JunkDrawerEditor (JunkDrawerProcessor& p) : AudioProcessorEdit
     setLookAndFeel (&lnf);
     setSize (kW, kH);
     setResizable (false, false);
+    buildModContext();
+    currentMod() = &modCtx;
+    proc.addChangeListener (this);
 
     header = std::make_unique<Header> (*this);
     drawerPage = std::make_unique<DrawerPage> (*this);
@@ -1399,7 +1658,37 @@ JunkDrawerEditor::JunkDrawerEditor (JunkDrawerProcessor& p) : AudioProcessorEdit
     resized();
 }
 
-JunkDrawerEditor::~JunkDrawerEditor() { setLookAndFeel (nullptr); }
+JunkDrawerEditor::~JunkDrawerEditor()
+{
+    proc.removeChangeListener (this);
+    if (currentMod() == &modCtx) currentMod() = nullptr;
+    setLookAndFeel (nullptr);
+}
+
+void JunkDrawerEditor::buildModContext()
+{
+    modCtx.armed = [this] { return proc.armedLfo(); };
+    modCtx.amount = [this] (const juce::String& id, int lfo) { return proc.modAmount (id, lfo); };
+    modCtx.setAmount = [this] (const juce::String& id, int lfo, float a) { proc.setMod (id, lfo, a); };
+    modCtx.remove = [this] (const juce::String& id, int lfo) { proc.removeMod (id, lfo); };
+    modCtx.lfosOn = [this] (const juce::String& id)
+    {
+        std::vector<int> out;
+        for (auto& a : proc.getMods()) if (a.target == id && std::find (out.begin(), out.end(), a.lfo) == out.end()) out.push_back (a.lfo);
+        std::sort (out.begin(), out.end());
+        return out;
+    };
+    modCtx.links = [this]
+    {
+        std::vector<LinkInfo> out;
+        for (auto& a : proc.getMods())
+        {
+            auto d = describeTarget (proc.state, a.target);
+            out.push_back ({ a.target, d.first, d.second, a.lfo, a.amount });
+        }
+        return out;
+    };
+}
 
 void JunkDrawerEditor::showPage (int p)
 {

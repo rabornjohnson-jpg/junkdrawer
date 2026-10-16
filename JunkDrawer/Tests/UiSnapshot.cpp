@@ -120,6 +120,11 @@ int main (int argc, char** argv)
         for (int s = 0; s < 16; ++s) setP (jd::stepId (0, s, jd::LaneRegion), (float) pattern[s]);
         for (int s = 0; s < 16; ++s) setP (jd::stepId (0, s, jd::LaneVolume), 0.35f + 0.65f * (float) ((s * 5) % 7) / 6.f);
         setP (jd::laneLenId (0, jd::LaneVolume), 12.f);
+        proc.setMod ("t1_r1_cutoff", 0, 0.45f);  proc.setMod ("t1_r1_pan", 3, -0.30f);  proc.setMod ("t1_r1_gain", 1, 0.20f);
+        proc.setMod ("t1_r1_drive", 0, 0.60f);   proc.setMod ("t1_r1_pitch", 2, 0.08f);
+        proc.setMod ("m_swing", 4, 0.15f);       proc.setMod ("fx_filter_cut", 0, 0.55f);  proc.setMod ("fx_delay_mix", 5, 0.25f);
+        proc.setMod ("fx_reverb_size", 1, -0.40f); proc.setMod ("l3_rate", 5, 0.10f);       proc.setMod ("fx_filter_res", 4, 0.30f);
+        proc.setArmedLfo (1);
         editor->showPage (0);
         for (int i = 0; i < 6; ++i) juce::MessageManager::getInstance()->runDispatchLoopUntil (40);
     }

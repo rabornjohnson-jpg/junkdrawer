@@ -96,13 +96,30 @@ struct LookAndFeel : juce::LookAndFeel_V4
 };
 
 //==============================================================================
+// LFO assignment, as the controls see it.  The editor fills this in; a knob asks it what is armed and what is linked.
+struct ModContext;
+inline ModContext*& currentMod() { static ModContext* p = nullptr; return p; }
+struct LinkInfo { juce::String target, name, where; int lfo = 0; float amount = 0.f; };
+struct ModContext
+{
+    juce::ChangeBroadcaster changed;
+    std::function<std::vector<LinkInfo>()> links;                            // every link, with names ready to show
+    std::function<int()> armed;                                               // the LFO a drag assigns, or -1
+    std::function<float (const juce::String&, int)> amount;                  // 0 when not linked
+    std::function<void (const juce::String&, int, float)> setAmount;
+    std::function<void (const juce::String&, int)> remove;
+    std::function<std::vector<int> (const juce::String&)> lfosOn;            // LFOs linked to a control
+};
+
+//==============================================================================
 // A parameter knob: wood dial, name, and the value as the parameter prints it.
-class Knob : public juce::Component
+// With an LFO armed, a drag on the knob sets how much that LFO moves it instead of changing the knob.
+class Knob : public juce::Component, private juce::ChangeListener
 {
 public:
     Knob (juce::AudioProcessorValueTreeState& s, const juce::String& id, const juce::String& label, int dialSize = 38,
-          juce::Colour nameColour = pal::text, juce::Colour valueColour = pal::amber, juce::String note = {})
-        : param (*s.getParameter (id)), size (dialSize), name (label), noteText (std::move (note)), nameCol (nameColour), valCol (valueColour)
+          juce::Colour nameColour = pal::text, juce::Colour valueColour = pal::amber, juce::String note = {}, ModContext* modulation = nullptr)
+        : param (*s.getParameter (id)), paramId (id), size (dialSize), name (label), noteText (std::move (note)), nameCol (nameColour), valCol (valueColour), ctx (modulation != nullptr ? modulation : currentMod())
     {
         slider.setSliderStyle (juce::Slider::RotaryHorizontalVerticalDrag);
         slider.setTextBoxStyle (juce::Slider::NoTextBox, true, 0, 0);
@@ -112,25 +129,85 @@ public:
         slider.onValueChange = [this] { repaint(); };
         addAndMakeVisible (slider);
         attach = std::make_unique<juce::SliderParameterAttachment> (param, slider, nullptr);
+        if (ctx != nullptr) { ctx->changed.addChangeListener (this); refreshMode(); }
     }
+
+    ~Knob() override { if (ctx != nullptr) ctx->changed.removeChangeListener (this); }
 
     void resized() override { slider.setBounds (getLocalBounds().withSizeKeepingCentre (size + 4, size + 4).withY (0)); }
 
     void paint (juce::Graphics& g) override
     {
+        const int armedLfo = ctx != nullptr ? ctx->armed() : -1;
+        const auto linked = ctx != nullptr ? ctx->lfosOn (paramId) : std::vector<int>();
+        const auto dial = slider.getBounds().toFloat();
+
+        if (! linked.empty())                                                   // the range the LFO sweeps, drawn around the dial
+        {
+            const int shown = armedLfo >= 0 && std::find (linked.begin(), linked.end(), armedLfo) != linked.end() ? armedLfo : linked.front();
+            const float amt = ctx->amount (paramId, shown), v = param.getValue();
+            const float a0 = juce::degreesToRadians (-135.f + 270.f * v), a1 = juce::degreesToRadians (-135.f + 270.f * juce::jlimit (0.f, 1.f, v + amt));
+            juce::Path arc;
+            arc.addCentredArc (dial.getCentreX(), dial.getCentreY(), (float) size * 0.5f + 1.f, (float) size * 0.5f + 1.f, 0.f, juce::jmin (a0, a1), juce::jmax (a0, a1), true);
+            g.setColour (pal::amber);
+            g.strokePath (arc, juce::PathStrokeType (2.4f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+            const int n = (int) linked.size();
+            for (int k = 0; k < juce::jmin (n, 2); ++k)
+            {
+                const auto b = juce::Rectangle<float> (dial.getRight() - 8.f - (float) k * 14.f, dial.getY() - 4.f, 18.f, 18.f);
+                g.setColour (juce::Colour (0xff2a1b10)); g.fillEllipse (b);
+                g.setColour (pal::amber); g.drawEllipse (b.reduced (0.5f), 1.f);
+                drawText (g, "L" + juce::String (linked[(size_t) k] + 1), b.toNearestInt(), mono (11.f, true), juce::Colour (0xfff6e8c9), juce::Justification::centred);
+            }
+        }
+
         auto r = getLocalBounds().withTrimmedTop (size + 6);
         drawText (g, name, r.removeFromTop (14), sans (12.f, true), nameCol, juce::Justification::centred);
-        drawText (g, param.getCurrentValueAsText(), r.removeFromTop (14), mono (11.f), valCol, juce::Justification::centred);
+        juce::String valueText = param.getCurrentValueAsText();
+        if (armedLfo >= 0 && ! linked.empty() && std::find (linked.begin(), linked.end(), armedLfo) != linked.end())
+        {
+            const int pct = juce::roundToInt (ctx->amount (paramId, armedLfo) * 100.f);
+            valueText = "L" + juce::String (armedLfo + 1) + " " + (pct > 0 ? "+" : "") + juce::String (pct) + "%";
+        }
+        drawText (g, valueText, r.removeFromTop (14), mono (11.f), valCol, juce::Justification::centred);
         if (noteText.isNotEmpty()) drawText (g, noteText, r.removeFromTop (14), sans (11.f), pal::textDim, juce::Justification::centred);
     }
+
+    void mouseDown (const juce::MouseEvent& e) override
+    {
+        if (! assigning()) return;
+        startAmount = ctx->amount (paramId, ctx->armed());
+        startY = e.y;
+    }
+    void mouseDrag (const juce::MouseEvent& e) override
+    {
+        if (! assigning()) return;
+        const float a = juce::jlimit (-1.f, 1.f, startAmount + (float) (startY - e.y) / 160.f);
+        if (std::abs (a) < 0.01f) ctx->remove (paramId, ctx->armed()); else ctx->setAmount (paramId, ctx->armed(), a);
+    }
+    void mouseDoubleClick (const juce::MouseEvent&) override { if (assigning()) ctx->remove (paramId, ctx->armed()); }
 
     juce::Slider slider;
 
 private:
+    bool assigning() const { return ctx != nullptr && ctx->armed() >= 0; }
+    void refreshMode()
+    {
+        const bool on = assigning();
+        slider.setInterceptsMouseClicks (! on, ! on);
+        setMouseCursor (on ? juce::MouseCursor::UpDownResizeCursor : juce::MouseCursor::NormalCursor);
+        repaint();
+    }
+    void changeListenerCallback (juce::ChangeBroadcaster*) override { refreshMode(); }
+
     juce::RangedAudioParameter& param;
+    juce::String paramId;
     int size;
     juce::String name, noteText;
     juce::Colour nameCol, valCol;
+    ModContext* ctx = nullptr;
+    float startAmount = 0.f;
+    int startY = 0;
     std::unique_ptr<juce::SliderParameterAttachment> attach;
 };
 
@@ -186,9 +263,15 @@ private:
 
 //==============================================================================
 // Dark inset panel with an optional title.
-struct Panel : juce::Component
+struct Panel : juce::Component, private juce::ChangeListener
 {
-    explicit Panel (juce::String t = {}, bool lit = false) : title (std::move (t)), highlighted (lit) { setInterceptsMouseClicks (false, true); }
+    explicit Panel (juce::String t = {}, bool lit = false) : title (std::move (t)), highlighted (lit), ctx (currentMod())
+    {
+        setInterceptsMouseClicks (false, true);
+        if (ctx != nullptr) ctx->changed.addChangeListener (this);
+    }
+    ~Panel() override { if (ctx != nullptr) ctx->changed.removeChangeListener (this); }
+    void changeListenerCallback (juce::ChangeBroadcaster*) override { repaint(); }
     void paint (juce::Graphics& g) override
     {
         auto r = getLocalBounds().toFloat();
@@ -200,6 +283,7 @@ struct Panel : juce::Component
     }
     juce::String title;
     bool highlighted;
+    ModContext* ctx = nullptr;
 };
 
 // Chip: rounded outlined label, used for "Hooked up" entries.
