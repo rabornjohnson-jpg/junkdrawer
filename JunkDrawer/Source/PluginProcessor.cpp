@@ -11,6 +11,11 @@ JunkDrawerProcessor::JunkDrawerProcessor()
     pVolume = state.getRawParameterValue ("m_volume");
     pPan    = state.getRawParameterValue ("m_pan");
     pDiv = state.getRawParameterValue ("seq_div");   pBpm = state.getRawParameterValue ("seq_bpm");  pRun = state.getRawParameterValue ("seq_run");
+    for (int i = 0; i < jd::kLfos; ++i)
+    {
+        auto g = [&] (const char* s) { return state.getRawParameterValue (jd::lfoId (i, s)); };
+        lp[(size_t) i] = { g ("shape"), g ("rate"), g ("div"), g ("depth"), g ("phase"), g ("fade"), g ("sync"), g ("polar"), g ("global") };
+    }
     pRate = state.getRawParameterValue ("m_rate");   pRateMode = state.getRawParameterValue ("m_ratemode");  pSwing = state.getRawParameterValue ("m_swing");
     for (int t = 0; t < jd::kTracks; ++t)
     {
@@ -47,6 +52,8 @@ void JunkDrawerProcessor::prepareToPlay (double sampleRate, int)
     for (auto& v : voices) { v.prepare (sampleRate); v.kill(); }
     fxFilter.prepare (sampleRate); fxDelay.prepare (sampleRate); fxReverb.prepare (sampleRate); fxLimiter.prepare (sampleRate);
     for (auto& b : wasOn) b = false;
+    for (int i = 0; i < jd::kLfos; ++i) for (int k = 0; k < 9; ++k) { lfoAcc[i][k] = 0.0; lfoSince[i][k] = 0.0; lfoRestartBeat[i][k] = 0.0; lfoOut[i][k].store (0.f); }
+    idleBeats = 0.0;
 
     if (rateChanged)                                          // samples are stored at the session rate, so a new rate means reading them again
         for (int t = 0; t < jd::kTracks; ++t)
@@ -85,10 +92,10 @@ jd::RegionSnapshot JunkDrawerProcessor::readRegion (int t, int r) const
 {
     const auto& p = rp[(size_t) t][(size_t) r];
     jd::RegionSnapshot s;
-    s.start = p.start->load(); s.end = p.end->load();
-    s.pitch = p.pitch->load(); s.gainDb = p.gain->load(); s.pan = p.pan->load();
-    s.cutoff = p.cutoff->load(); s.reso = p.reso->load(); s.driveDb = p.drive->load();
-    s.attackMs = p.attack->load(); s.decayMs = p.decay->load(); s.sustain = p.sustain->load(); s.releaseMs = p.release->load();
+    s.start = v (p.start); s.end = v (p.end);
+    s.pitch = v (p.pitch); s.gainDb = v (p.gain); s.pan = v (p.pan);
+    s.cutoff = v (p.cutoff); s.reso = v (p.reso); s.driveDb = v (p.drive);
+    s.attackMs = v (p.attack); s.decayMs = v (p.decay); s.sustain = v (p.sustain); s.releaseMs = v (p.release);
     s.loop = juce::roundToInt (p.loop->load()); s.reverse = p.reverse->load() > 0.5f;
     return s;
 }
@@ -226,8 +233,13 @@ void JunkDrawerProcessor::processBlock (juce::AudioBuffer<float>& buf, juce::Mid
     const int n = buf.getNumSamples();
     if (buf.getNumChannels() < 2) return;
 
-    volume.setTargetValue (juce::Decibels::decibelsToGain (pVolume->load(), -59.f));
-    pan.setTargetValue (pPan->load());
+    if (modDirty.load())
+    {
+        const juce::SpinLock::ScopedTryLockType sl (modLock);
+        if (sl.isLocked()) { std::swap (table, modIncoming); modDirty = false; }
+    }
+    volume.setTargetValue (juce::Decibels::decibelsToGain (v (pVolume), -59.f));
+    pan.setTargetValue (v (pPan));
 
     auto* l = buf.getWritePointer (0);
     auto* r = buf.getWritePointer (1);
@@ -250,8 +262,8 @@ void JunkDrawerProcessor::processBlock (juce::AudioBuffer<float>& buf, juce::Mid
         jd::RegionSnapshot s;
         if (cmd == 100) { s.loop = jd::OneShot; }                            // the whole sample, plain
         else s = readRegion (t, juce::jlimit (0, jd::kRegions - 1, cmd - 1));
-        const float g = juce::Decibels::decibelsToGain (tp[(size_t) t].level->load(), -59.f);
-        voices[(size_t) t].trigger (std::move (d), s, g, tp[(size_t) t].pan->load());
+        const float g = juce::Decibels::decibelsToGain (v (tp[(size_t) t].level), -59.f);
+        voices[(size_t) t].trigger (std::move (d), s, g, v (tp[(size_t) t].pan));
     }
 
     // 2. transport: the host's position when it is playing, otherwise our own clock (standalone, or the Run switch)
@@ -273,14 +285,16 @@ void JunkDrawerProcessor::processBlock (juce::AudioBuffer<float>& buf, juce::Mid
     if (ppq0 < 0.0) running = false;
     const double dppq = bpm / (60.0 * hostRate);
     internalPpq = running ? internalPpq + dppq * n : 0.0;
+    updateModulation (n, running ? ppq0 : idleBeats, running, running && ! seqWasRunning, bpm);
+    if (! running) idleBeats += dppq * n;
 
-    double rate = pRate->load();
+    double rate = v (pRate);
     if (pRateMode->load() > 0.5f) rate = jd::snapRate (rate);
     const double beats = jd::stepBeats (juce::roundToInt (pDiv->load()));
     const double u0 = ppq0 * rate / beats, dU = dppq * rate / beats;
-    const double swing = pSwing->load();
+    const double swing = v (pSwing);
     static const float ranges[] = { 12.f, 24.f, 48.f };
-    const float masterPitch = juce::jlimit (-ranges[juce::jlimit (0, 2, juce::roundToInt (state.getRawParameterValue ("m_pitchrange")->load()))], ranges[juce::jlimit (0, 2, juce::roundToInt (state.getRawParameterValue ("m_pitchrange")->load()))], state.getRawParameterValue ("m_pitch")->load());
+    const float masterPitch = juce::jlimit (-ranges[juce::jlimit (0, 2, juce::roundToInt (state.getRawParameterValue ("m_pitchrange")->load()))], ranges[juce::jlimit (0, 2, juce::roundToInt (state.getRawParameterValue ("m_pitchrange")->load()))], vId ("m_pitch"));
 
     auto renderVoices = [&] (int from, int to)
     {
@@ -308,7 +322,11 @@ void JunkDrawerProcessor::processBlock (juce::AudioBuffer<float>& buf, juce::Mid
             for (int t = 0; t < jd::kTracks; ++t)
             {
                 auto& q = seq[(size_t) t];
-                if (S != q.step) applyStep (t, q, S);
+                if (S != q.step)
+                {
+                    applyStep (t, q, S);
+                    if (S % laneLength (t, jd::LaneRegion) == 0) restartFlag[(size_t) t] = true;      // a per-track LFO starts over with its track's loop
+                }
                 if (q.region == 0) continue;
                 const int sub = juce::jmin (q.ratchet - 1, (int) (frac * q.ratchet));
                 const double subFrac = frac * q.ratchet - sub;
@@ -334,8 +352,8 @@ void JunkDrawerProcessor::processBlock (juce::AudioBuffer<float>& buf, juce::Mid
                 auto s = readRegion (t, q.region - 1);
                 s.pitch += q.pitch + masterPitch;
                 if (q.dir == 1) s.reverse = false; else if (q.dir == 2) s.reverse = true;
-                const float g = juce::Decibels::decibelsToGain (tp[(size_t) t].level->load(), -59.f) * q.vol;
-                voices[(size_t) t].trigger (std::move (d), s, g, tp[(size_t) t].pan->load());
+                const float g = juce::Decibels::decibelsToGain (v (tp[(size_t) t].level), -59.f) * q.vol;
+                voices[(size_t) t].trigger (std::move (d), s, g, v (tp[(size_t) t].pan));
                 q.fromSeq = true;
             }
         }
@@ -354,7 +372,7 @@ void JunkDrawerProcessor::processBlock (juce::AudioBuffer<float>& buf, juce::Mid
 
     // 4. effects, each skipped while it is off (and cleared when it comes back on, so no old tail jumps out)
     {
-        auto P = [&] (const char* id) { return state.getRawParameterValue (id)->load(); };
+        auto P = [&] (const char* id) { return vId (id); };
         if (P ("fx_filter_on") > 0.5f)
         {
             if (! wasOn[0]) fxFilter.reset();
@@ -398,7 +416,7 @@ void JunkDrawerProcessor::processBlock (juce::AudioBuffer<float>& buf, juce::Mid
     }
     if (state.getRawParameterValue ("fx_lim_on")->load() > 0.5f)
     {
-        auto P = [&] (const char* id) { return state.getRawParameterValue (id)->load(); };
+        auto P = [&] (const char* id) { return vId (id); };
         if (! wasOn[3]) fxLimiter.reset();
         fxLimiter.set (juce::roundToInt (P ("fx_lim_mode")) == 1, P ("fx_lim_ceiling"), P ("fx_lim_release"), P ("fx_lim_input"), P ("fx_lim_mix"), juce::roundToInt (P ("fx_lim_look")));
         fxLimiter.process (l, r, n);
@@ -441,6 +459,138 @@ void JunkDrawerProcessor::fillPatternIfEmpty (int track)
     for (int s = 0; s < jd::kSteps; ++s) setParam (state, jd::stepId (track, s, jd::LaneRegion), (float) (s % count + 1));
 }
 
+//==============================================================================
+// LFOs.  Everything here runs once per block, so ten assignments or a hundred cost about the same.
+void JunkDrawerProcessor::evalTargets()
+{
+    if (table == nullptr) return;
+    for (size_t k = 0; k < table->targets.size(); ++k)
+    {
+        const auto& tg = table->targets[k];
+        float sum = 0.f;
+        for (const auto& e : table->entries)
+            if (e.target == (int) k) sum += e.amount * lfoOut[e.lfo][(tg.track >= 0 && lfoPerTrack[e.lfo]) ? tg.track : 8].load (std::memory_order_relaxed);
+        const float base = tg.param->convertTo0to1 (tg.raw->load());
+        effPlain[k] = tg.param->convertFrom0to1 (juce::jlimit (0.f, 1.f, base + sum));
+    }
+}
+
+void JunkDrawerProcessor::updateModulation (int n, double clockBeats, bool running, bool justStarted, double bpm)
+{
+    juce::ignoreUnused (running, bpm);
+    const double dt = (double) n / hostRate;
+    evalTargets();                                                // values for LFO settings that other LFOs move, from the last block
+    for (int i = 0; i < jd::kLfos; ++i)
+    {
+        const auto& p = lp[(size_t) i];
+        const int shape = juce::roundToInt (p.shape->load());
+        const float hz = v (p.rate), depth = juce::jlimit (0.f, 1.f, v (p.depth)), phaseDeg = v (p.phase), fadeMs = v (p.fade);
+        const int div = juce::roundToInt (p.div->load()), sync = juce::roundToInt (p.sync->load());
+        const bool uni = juce::roundToInt (p.polar->load()) == 0, global = p.global->load() > 0.5f;
+        lfoPerTrack[i] = ! global;
+        const double period = sync > 0 ? jd::lfoPeriodBeats (div, sync) : 1.0;
+
+        for (int inst = 0; inst < 9; ++inst)
+        {
+            if (inst < jd::kTracks && global) { lfoOut[i][inst].store (lfoOut[i][8].load (std::memory_order_relaxed), std::memory_order_relaxed); continue; }
+            if (inst == 8 && justStarted) { lfoAcc[i][8] = 0.0; lfoSince[i][8] = 0.0; }
+            if (inst < jd::kTracks && restartFlag[(size_t) inst]) { lfoAcc[i][inst] = 0.0; lfoSince[i][inst] = 0.0; lfoRestartBeat[i][inst] = clockBeats; }
+
+            double ph;
+            if (sync == 0) { ph = lfoAcc[i][inst]; lfoAcc[i][inst] += (double) hz * dt; }
+            else ph = (clockBeats - (inst < jd::kTracks ? lfoRestartBeat[i][inst] : 0.0)) / period;
+            ph += (double) phaseDeg / 360.0;
+            if (ph < 0.0) ph += std::ceil (-ph);
+
+            float out = jd::lfoShape (shape, ph, (juce::uint32) (i * 16 + inst));
+            if (uni) out = 0.5f * (out + 1.f);
+            const float fade = fadeMs > 0.5f ? (float) juce::jmin (1.0, lfoSince[i][inst] / ((double) fadeMs * 0.001)) : 1.f;
+            lfoSince[i][inst] += dt;
+            lfoOut[i][inst].store (out * depth * fade, std::memory_order_relaxed);
+        }
+        evalTargets();                                            // LFOs further down the list now see this one
+    }
+    restartFlag.fill (false);
+}
+
+//==============================================================================
+void JunkDrawerProcessor::publishMods()
+{
+    auto t = std::make_shared<jd::ModTable>();
+    std::vector<juce::String> ids;
+    for (const auto& a : mods)
+    {
+        auto* prm = state.getParameter (a.target);
+        if (prm == nullptr || ! canModulate (prm) || (int) t->entries.size() >= jd::kMaxMods) continue;
+        int idx = -1;
+        for (size_t k = 0; k < ids.size(); ++k) if (ids[k] == a.target) { idx = (int) k; break; }
+        if (idx < 0)
+        {
+            idx = (int) ids.size();
+            ids.push_back (a.target);
+            int track = -1;
+            if (a.target.startsWithChar ('t') && juce::CharacterFunctions::isDigit (a.target[1])) track = juce::jlimit (0, jd::kTracks - 1, a.target.substring (1).getIntValue() - 1);
+            t->targets.push_back ({ state.getRawParameterValue (a.target), prm, track });
+        }
+        t->entries.push_back ({ idx, juce::jlimit (0, jd::kLfos - 1, a.lfo), juce::jlimit (-1.f, 1.f, a.amount) });
+    }
+    {
+        const juce::SpinLock::ScopedLockType sl (modLock);
+        modIncoming = t;
+        modDirty = true;
+    }
+    saveMods();
+    sendChangeMessage();
+}
+
+void JunkDrawerProcessor::setMod (const juce::String& target, int lfo, float amount)
+{
+    auto* prm = state.getParameter (target);
+    if (prm == nullptr || ! canModulate (prm)) return;
+    for (auto& a : mods) if (a.target == target && a.lfo == lfo) { a.amount = juce::jlimit (-1.f, 1.f, amount); publishMods(); return; }
+    if ((int) mods.size() >= jd::kMaxMods) return;
+    mods.push_back ({ target, lfo, juce::jlimit (-1.f, 1.f, amount) });
+    publishMods();
+}
+
+void JunkDrawerProcessor::removeMod (const juce::String& target, int lfo)
+{
+    mods.erase (std::remove_if (mods.begin(), mods.end(), [&] (const jd::Assign& a) { return a.target == target && a.lfo == lfo; }), mods.end());
+    publishMods();
+}
+
+void JunkDrawerProcessor::clearMods() { mods.clear(); publishMods(); }
+
+float JunkDrawerProcessor::modAmount (const juce::String& target, int lfo) const
+{
+    for (const auto& a : mods) if (a.target == target && a.lfo == lfo) return a.amount;
+    return 0.f;
+}
+
+void JunkDrawerProcessor::saveMods()
+{
+    auto node = state.state.getOrCreateChildWithName ("mods", nullptr);
+    node.removeAllChildren (nullptr);
+    for (const auto& a : mods)
+    {
+        juce::ValueTree m ("m");
+        m.setProperty ("id", a.target, nullptr); m.setProperty ("lfo", a.lfo, nullptr); m.setProperty ("amount", a.amount, nullptr);
+        node.appendChild (m, nullptr);
+    }
+}
+
+void JunkDrawerProcessor::loadMods()
+{
+    mods.clear();
+    auto node = state.state.getChildWithName ("mods");
+    for (int i = 0; i < node.getNumChildren(); ++i)
+    {
+        auto m = node.getChild (i);
+        mods.push_back ({ m.getProperty ("id").toString(), (int) m.getProperty ("lfo"), (float) (double) m.getProperty ("amount") });
+    }
+    publishMods();
+}
+
 juce::AudioProcessorEditor* JunkDrawerProcessor::createEditor() { return new JunkDrawerEditor (*this); }
 
 void JunkDrawerProcessor::getStateInformation (juce::MemoryBlock& dest)
@@ -455,6 +605,7 @@ void JunkDrawerProcessor::setStateInformation (const void* data, int size)
         if (xml->hasTagName (state.state.getType()))
         {
             state.replaceState (juce::ValueTree::fromXml (*xml));
+            loadMods();
             auto node = state.state.getChildWithName ("samples");
             for (int t = 0; t < jd::kTracks; ++t)
             {

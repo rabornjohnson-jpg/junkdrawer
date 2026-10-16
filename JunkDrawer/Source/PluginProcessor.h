@@ -3,6 +3,7 @@
 #include "Voice.h"
 #include "Sequencer.h"
 #include "Effects.h"
+#include "Modulation.h"
 
 class JunkDrawerProcessor : public juce::AudioProcessor, public juce::ChangeBroadcaster
 {
@@ -49,6 +50,19 @@ public:
     std::vector<float> hitsFor (int track) const;                 // cached hit positions of the loaded sample
     jd::RegionSnapshot readRegion (int track, int region) const;
 
+    // LFO assignments.  A link says "this LFO moves this control by this much"; many controls per LFO and many LFOs per control are fine.
+    // Only continuous controls can be linked.  These run on the message thread.
+    static bool canModulate (juce::RangedAudioParameter* p) { return dynamic_cast<juce::AudioParameterFloat*> (p) != nullptr; }
+    void setMod (const juce::String& target, int lfo, float amount);   // adds the link, or changes its amount
+    void removeMod (const juce::String& target, int lfo);
+    void clearMods();
+    float modAmount (const juce::String& target, int lfo) const;       // 0 when there is no link
+    std::vector<jd::Assign> getMods() const { return mods; }
+    int armedLfo() const noexcept { return armed; }                    // the LFO a drag on a knob will assign, or -1
+    void setArmedLfo (int lfo) { armed = lfo; sendChangeMessage(); }
+    /** The LFO's current output (what the editor draws); -1..+1 before depth and polarity are applied is not kept, so this is the final 0..depth or -depth..+depth value. */
+    float lfoValue (int lfo) const noexcept { return lfoOut[(size_t) lfo][8].load (std::memory_order_relaxed); }
+
     // Preview from the Drawer page.  The sequencer (Stage 3) will trigger the same voices on steps.
     void auditionRegion (int track, int region)  { audition[(size_t) track].store (1 + region); }
     void auditionWhole  (int track)              { audition[(size_t) track].store (100); }
@@ -85,6 +99,35 @@ private:
     juce::CriticalSection messageLock;
     juce::String loadMessage;
     std::atomic<bool> alive { true };
+
+    // ---- modulation (audio thread unless noted) ----
+    std::vector<jd::Assign> mods;                                      // message thread
+    int armed = -1;
+    void publishMods();
+    void saveMods();
+    void loadMods();
+    mutable juce::SpinLock modLock;
+    std::shared_ptr<const jd::ModTable> modIncoming;                   // handed over under modLock
+    std::atomic<bool> modDirty { false };
+    std::shared_ptr<const jd::ModTable> table;                         // the audio thread's copy
+    std::array<float, jd::kMaxMods> effPlain {};
+    float v (const std::atomic<float>* raw) const noexcept
+    {
+        if (table != nullptr)
+            for (size_t k = 0; k < table->targets.size(); ++k)
+                if (table->targets[k].raw == raw) return effPlain[k];
+        return raw->load();
+    }
+    float vId (const char* id) const { return v (state.getRawParameterValue (id)); }
+    void updateModulation (int n, double clockBeats, bool running, bool justStarted, double bpm);
+    void evalTargets();
+    std::atomic<float> lfoOut[jd::kLfos][9] {};                        // [lfo][track 0-7, or 8 for the shared copy]
+    double lfoAcc[jd::kLfos][9] {}, lfoSince[jd::kLfos][9] {}, lfoRestartBeat[jd::kLfos][9] {};
+    bool lfoPerTrack[jd::kLfos] {};
+    std::array<bool, jd::kTracks> restartFlag {};
+    struct LfoPtrs { std::atomic<float> *shape, *rate, *div, *depth, *phase, *fade, *sync, *polar, *global; };
+    std::array<LfoPtrs, jd::kLfos> lp {};
+    double idleBeats = 0.0;
 
     juce::SmoothedValue<float> volume, pan;
     std::atomic<float>* pVolume = nullptr;

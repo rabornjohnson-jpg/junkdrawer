@@ -380,6 +380,107 @@ int main()
         check (ms < 3000.0, "all four effects together run far faster than real time");
     }
 
+    // ------------------------------------------------------------------------------------------------------------
+    std::printf ("LFOs\n");
+    {
+        check (std::abs (jd::lfoShape (0, 0.25, 0) - 1.f) < 1.0e-5f && std::abs (jd::lfoShape (0, 0.75, 0) + 1.f) < 1.0e-5f, "a sine peaks a quarter of the way round");
+        check (std::abs (jd::lfoShape (1, 0.25, 0) - 1.f) < 1.0e-5f && std::abs (jd::lfoShape (1, 0.75, 0) + 1.f) < 1.0e-5f, "a triangle does the same");
+        check (jd::lfoShape (3, 0.2, 0) == 1.f && jd::lfoShape (3, 0.7, 0) == -1.f, "a square flips at the half");
+        check (jd::lfoShape (4, 3.1, 7) == jd::lfoShape (4, 3.9, 7) && jd::lfoShape (4, 3.1, 7) != jd::lfoShape (4, 4.1, 7), "sample and hold holds for a whole cycle and then picks a new value");
+        bool inRange = true;
+        for (int s = 0; s < 7; ++s) for (double ph = 0.0; ph < 40.0; ph += 0.037) { const float x = jd::lfoShape (s, ph, 3); inRange = inRange && x >= -1.001f && x <= 1.001f; }
+        check (inRange, "every shape stays between -1 and +1");
+
+        JunkDrawerProcessor lp;
+        lp.prepareToPlay (rate, 256);
+        setP (lp, "m_volume", 0.f);
+        fxOff (lp);
+        auto blocks = [&] (JunkDrawerProcessor& p, double secs, std::function<void (int)> each)
+        {
+            juce::AudioBuffer<float> b (2, 256);
+            juce::MidiBuffer mm;
+            const int count = (int) (secs * rate / 256.0);
+            for (int i = 0; i < count; ++i) { b.clear(); p.processBlock (b, mm); each (i); }
+        };
+        auto crossings = [&] (JunkDrawerProcessor& p, int lfo, double secs)
+        {
+            int n = 0; float prev = 0.f;
+            blocks (p, secs, [&] (int) { const float x = p.lfoValue (lfo); if ((x > 0.f) != (prev > 0.f) && std::abs (prev) > 1.0e-4f) ++n; prev = x; });
+            return n;
+        };
+
+        setP (lp, "l1_shape", 0.f); setP (lp, "l1_rate", 4.f); setP (lp, "l1_sync", 0.f); setP (lp, "l1_depth", 1.f); setP (lp, "l1_polar", 1.f); setP (lp, "l1_global", 1.f);
+        const int free4 = crossings (lp, 0, 2.0);
+        check (free4 >= 14 && free4 <= 17, "a free LFO at 4 Hz crosses zero about 16 times in 2 seconds");
+
+        setP (lp, "l1_sync", 1.f); setP (lp, "l1_div", 2.f);              // 1/4 note
+        setP (lp, "seq_bpm", 120.f);
+        const int synced = crossings (lp, 0, 2.0);
+        check (synced >= 6 && synced <= 9, "synced to 1/4 at 120 BPM it runs at 2 Hz (about 8 crossings in 2 seconds)");
+
+        setP (lp, "l1_sync", 0.f); setP (lp, "l1_polar", 0.f); setP (lp, "l1_depth", 0.5f);
+        float lo = 9.f, hi = -9.f;
+        blocks (lp, 1.0, [&] (int) { lo = juce::jmin (lo, lp.lfoValue (0)); hi = juce::jmax (hi, lp.lfoValue (0)); });
+        check (lo >= -0.001f && hi <= 0.501f && hi > 0.45f, "unipolar with depth 50 percent swings between 0 and 0.5");
+
+        setP (lp, "l1_polar", 1.f); setP (lp, "l1_depth", 1.f); setP (lp, "l1_fade", 1000.f);
+        lp.prepareToPlay (rate, 256);
+        float early = 0.f, late = 0.f;
+        blocks (lp, 1.5, [&] (int i) { const float x = std::abs (lp.lfoValue (0)); if (i < 20) early = juce::jmax (early, x); if (i > 240) late = juce::jmax (late, x); });
+        check (early < 0.2f && late > 0.8f, "fade in brings an LFO up over its fade time");
+        setP (lp, "l1_fade", 0.f);
+
+        // an LFO moving the master pan swings the sound between the ears
+        lp.loadFile (0, tone);
+        check (waitForTrack (lp, 0), "the tone loads for the LFO tests");
+        lp.sliceEqual (0, 1);
+        setP (lp, "t1_r1_loop", 1.f);                                    // loop, so the tone keeps sounding
+        for (int s = 0; s < jd::kSteps; ++s) setP (lp, jd::stepId (0, s, jd::LaneRegion), s == 0 ? 1.f : 0.f);
+        setP (lp, "l1_rate", 2.f); setP (lp, "l1_sync", 0.f); setP (lp, "m_pan", 0.f);
+        lp.setMod ("m_pan", 0, 1.f);
+        check (lp.getMods().size() == 1 && lp.modAmount ("m_pan", 0) == 1.f, "an assignment is stored");
+        setP (lp, "seq_run", 1.f);
+        auto sw = run (lp, 0.6, rate);
+        auto side = [&] (int a, int z, int ch) { double s = 0.0; for (int i = a; i < z; ++i) s += std::abs (sw.getSample (ch, i)); return s; };
+        const int q1 = (int) (0.25 * rate / 2.0 * 1.0), q3 = (int) (0.75 * rate / 2.0);       // quarter and three quarters of a 2 Hz cycle
+        check (side (q1 - 400, q1 + 400, 1) > 4.0 * side (q1 - 400, q1 + 400, 0), "at the top of the LFO the sound is in the right ear");
+        check (side (q3 - 400, q3 + 400, 0) > 4.0 * side (q3 - 400, q3 + 400, 1), "at the bottom of it the sound is in the left ear");
+
+        lp.removeMod ("m_pan", 0);
+        setP (lp, "seq_run", 0.f); run (lp, 0.1, rate); setP (lp, "seq_run", 1.f);
+        sw = run (lp, 0.3, rate);
+        const double l0 = side (2000, 8000, 0), r0 = side (2000, 8000, 1);
+        check (std::abs (l0 - r0) < 0.05 * (l0 + r0) && lp.getMods().empty(), "taking the assignment off puts the pan back in the middle");
+
+        lp.setMod ("t1_mute", 0, 1.f);
+        check (lp.getMods().empty(), "a switch cannot be assigned, only continuous controls");
+
+        // LFO moving another LFO
+        JunkDrawerProcessor lq;
+        lq.prepareToPlay (rate, 256);
+        setP (lq, "l1_shape", 0.f); setP (lq, "l1_rate", 1.f); setP (lq, "l1_polar", 0.f); setP (lq, "l1_depth", 1.f);
+        setP (lq, "l2_shape", 3.f); setP (lq, "l2_rate", 20.f); setP (lq, "l2_polar", 0.f); setP (lq, "l2_depth", 0.5f);
+        lq.setMod ("l2_depth", 0, 1.f);
+        float mn = 9.f, mx = -9.f;
+        blocks (lq, 2.0, [&] (int) { mn = juce::jmin (mn, lq.lfoValue (1)); mx = juce::jmax (mx, lq.lfoValue (1)); });
+        check (mx > 0.9f, "one LFO can move another one's depth (it reaches nearly full)");
+
+        // per-track copies keep their own phase and start over with their loop
+        JunkDrawerProcessor lt;
+        lt.prepareToPlay (rate, 256);
+        setP (lt, "l3_global", 0.f);
+        check (lt.lfoValue (2) == 0.f, "an LFO that has not run yet reads zero");
+
+        // assignments survive saving
+        juce::MemoryBlock saved2;
+        lp.setMod ("fx_filter_cut", 3, -0.4f);
+        lp.getStateInformation (saved2);
+        JunkDrawerProcessor lr;
+        lr.prepareToPlay (rate, 256);
+        lr.setStateInformation (saved2.getData(), (int) saved2.getSize());
+        check (lr.getMods().size() == 1 && lr.modAmount ("fx_filter_cut", 3) == -0.4f, "assignments come back when a project is reloaded");
+    }
+
     proc.clearTrack (0);
     check (proc.getTrack (0) == nullptr, "clearing a track empties it");
 
