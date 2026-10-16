@@ -315,6 +315,20 @@ void JunkDrawerProcessor::processBlock (juce::AudioBuffer<float>& buf, juce::Mid
         }
     };
 
+    // A step can be pushed early or late by up to half its own length.  Tracks that use none of it take the cheap path.
+    std::array<bool, jd::kTracks> shifted {};
+    for (int t = 0; t < jd::kTracks; ++t)
+        for (int s = 0; s < jd::kSteps; ++s)
+            if (std::abs (sp[(size_t) t][(size_t) s].v[jd::LaneTime]->load()) > 0.0005f) { shifted[(size_t) t] = true; break; }
+    const double swingC = juce::jlimit (0.5, 0.75, swing);
+    auto timeAt = [&] (int t, long long step)
+    {
+        const int len = juce::jlimit (1, jd::kSteps, juce::roundToInt (laneLen[(size_t) t][jd::LaneTime]->load()));
+        return (double) sp[(size_t) t][(size_t) (((step % len) + len) % len)].v[jd::LaneTime]->load();
+    };
+    auto startOf = [&] (long long s) { return (double) ((s >> 1) * 2) + ((s & 1) != 0 ? 2.0 * swingC : 0.0); };
+    auto lengthOf = [&] (long long s) { return (s & 1) != 0 ? 2.0 * (1.0 - swingC) : 2.0 * swingC; };
+
     int segStart = 0;
     if (running)
     {
@@ -330,14 +344,25 @@ void JunkDrawerProcessor::processBlock (juce::AudioBuffer<float>& buf, juce::Mid
             for (int t = 0; t < jd::kTracks; ++t)
             {
                 auto& q = seq[(size_t) t];
-                if (S != q.step)
+                long long St = S;
+                double ft = frac;
+                if (shifted[(size_t) t] && S >= 1)
                 {
-                    applyStep (t, q, S);
-                    if (S % laneLength (t, jd::LaneRegion) == 0) restartFlag[(size_t) t] = true;      // a per-track LFO starts over with its track's loop
+                    const double uu = u0 + dU * i;
+                    for (long long cnd = S + 1; cnd >= S - 1; --cnd)
+                    {
+                        const double trig = startOf (cnd) + timeAt (t, cnd) * lengthOf (cnd);
+                        if (trig <= uu || cnd == S - 1) { St = cnd; ft = juce::jlimit (0.0, 0.999, (uu - trig) / lengthOf (cnd)); break; }
+                    }
+                }
+                if (St != q.step)
+                {
+                    applyStep (t, q, St);
+                    if (St % laneLength (t, jd::LaneRegion) == 0) restartFlag[(size_t) t] = true;      // a per-track LFO starts over with its track's loop
                 }
                 if (q.region == 0) continue;
-                const int sub = juce::jmin (q.ratchet - 1, (int) (frac * q.ratchet));
-                const double subFrac = frac * q.ratchet - sub;
+                const int sub = juce::jmin (q.ratchet - 1, (int) (ft * q.ratchet));
+                const double subFrac = ft * q.ratchet - sub;
                 if (sub != q.sub)                                          { q.sub = sub; q.released = false; action[(size_t) t] = 1; any = true; }
                 else if (! q.released && ! q.noGate && subFrac >= q.len)  { q.released = true; action[(size_t) t] = 2; any = true; }
             }
@@ -453,6 +478,8 @@ void JunkDrawerProcessor::applyStep (int t, SeqTrack& q, long long step) const
     q.ratchet = juce::jlimit (1, 4, juce::roundToInt (at (jd::LaneRatchet)));
     q.dir = juce::roundToInt (at (jd::LaneDirection));
     q.len = at (jd::LaneLength);
+    const float chance = at (jd::LaneProb);
+    if (q.region > 0 && chance < 0.999f && jd::hash01 ((juce::uint32) (step * 40503LL + (long long) t * 7919LL + 17LL)) >= chance) q.region = 0;      // the same dice every run, so a render matches what you heard
     q.sub = -1;
     q.released = false;
     q.noGate = q.region > 0 && q.len >= 0.999f && juce::roundToInt (rp[(size_t) t][(size_t) (q.region - 1)].loop->load()) == jd::OneShot;
@@ -485,7 +512,7 @@ void JunkDrawerProcessor::rollSteps (int track, float chance)
     if (juce::roundToInt (regCount[(size_t) track]->load()) < 1) return;
     juce::Random rnd;
     const int regions = juce::roundToInt (regCount[(size_t) track]->load());
-    for (int ln = 0; ln < jd::kLanes; ++ln)
+    for (int ln = 0; ln < jd::kRolled; ++ln)
     {
         if (state.getRawParameterValue (juce::String ("lock_") + jd::laneKey (ln))->load() > 0.5f) continue;
         for (int s = 0; s < jd::kSteps; ++s)

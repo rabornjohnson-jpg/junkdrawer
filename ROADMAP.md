@@ -80,7 +80,7 @@ Step-lane engine, LFO engine, file loading, DAW recording pipeline. Pull these i
 - Master and per-track meters; per-track mute, solo, pan, and output routing to separate outs.
 
 ### Stage 7: Depth
-- Per-step probability, micro-timing, and conditions ("every 3rd loop").
+- Per-step probability (Chance lane) and micro-timing (Timing lane, early or late by up to half a step): BUILT. Chance uses fixed dice, so every run and every export plays the same. Rummage and Shake leave these two lanes alone. Not done: conditions ("every 3rd loop").
 - Per-step filter, pan, and gate/hold.
 - Ratchet shapes (rising, falling, bouncing) and ratchet probability.
 - Region modes: sequential, random, pendulum, weighted random.

@@ -141,6 +141,37 @@ int main (int argc, char** argv)
         png.writeImageToStream (img, fs);
         problems += checkLayout (*editor, names[p]);
     }
+    // the Chance and Timing lanes
+    {
+        std::function<juce::TextButton*(juce::Component&, const juce::String&)> findTab = [&] (juce::Component& c, const juce::String& name) -> juce::TextButton*
+        {
+            for (auto* ch : c.getChildren())
+            {
+                if (auto* b = dynamic_cast<juce::TextButton*> (ch)) if (b->getButtonText() == name && b->isVisible()) return b;
+                if (auto* f = findTab (*ch, name)) return f;
+            }
+            return nullptr;
+        };
+        editor->showPage (0);
+        for (int k = 0; k < jd::kSteps; ++k)
+        {
+            auto set = [&] (int lane, float v) { auto* p = proc.state.getParameter (jd::stepId (0, k, lane)); p->setValueNotifyingHost (p->convertTo0to1 (v)); };
+            set (jd::LaneProb, k % 4 == 0 ? 1.f : (k % 4 == 1 ? 0.75f : (k % 4 == 2 ? 0.5f : 0.25f)));
+            set (jd::LaneTime, k % 3 == 0 ? 0.f : (k % 3 == 1 ? 0.25f : -0.2f));
+        }
+        for (const char* nm : { "Chance", "Timing" })
+        {
+            if (auto* b = findTab (*editor, nm)) b->triggerClick();
+            for (int i = 0; i < 6; ++i) juce::MessageManager::getInstance()->runDispatchLoopUntil (40);
+            auto img = editor->createComponentSnapshot (editor->getLocalBounds(), true, 1.0f);
+            juce::PNGImageFormat png;
+            auto f = out.getChildFile (juce::String ("lane_") + juce::String (nm).toLowerCase() + ".png");
+            f.deleteFile();
+            juce::FileOutputStream fs (f);
+            png.writeImageToStream (img, fs);
+            problems += checkLayout (*editor, nm);
+        }
+    }
     // the recording panel, set up and ready (opened with the Record button, as a person would)
     {
         std::function<juce::TextButton*(juce::Component&)> find = [&] (juce::Component& c) -> juce::TextButton*

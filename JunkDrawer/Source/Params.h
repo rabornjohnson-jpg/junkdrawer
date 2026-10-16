@@ -13,11 +13,12 @@ inline juce::String lfoId   (int lfo,   const char* suffix) { return "l" + juce:
 
 inline juce::String regionId (int track, int region, const char* suffix) { return "t" + juce::String (track + 1) + "_r" + juce::String (region + 1) + "_" + suffix; }
 // Sequencer lanes.  Every lane has its own length (1-16 steps) and its own 16 step values, so lanes can run against each other.
-enum Lane { LaneRegion, LaneVolume, LanePitch, LaneRatchet, LaneDirection, LaneLength, kLanes };
+enum Lane { LaneRegion, LaneVolume, LanePitch, LaneRatchet, LaneDirection, LaneLength, LaneProb, LaneTime, kLanes };
+constexpr int kRolled = 6;                // Rummage and Shake re-roll the first six lanes; probability and timing are left as set
 constexpr int kSteps = 16;
 inline const char* laneKey (int lane)
 {
-    static const char* k[] = { "region", "vol", "pitch", "ratchet", "dir", "len" };
+    static const char* k[] = { "region", "vol", "pitch", "ratchet", "dir", "len", "prob", "time" };
     return k[lane];
 }
 inline juce::String stepId (int track, int step, int lane) { return "t" + juce::String (track + 1) + "_s" + juce::String (step + 1) + "_" + laneKey (lane); }
@@ -154,7 +155,7 @@ inline juce::AudioProcessorValueTreeState::ParameterLayout createLayout()
     // ---- Sequencer (global) ---------------------------------------------------------------------------------------
     addChoice (l, "seq_div", "Step length", kStepDivs, 2);
     addChoice (l, "seq_feel", "Step feel", kStepFeels, 0);
-    for (int ln = 0; ln < kLanes; ++ln) addBool (l, juce::String ("lock_") + laneKey (ln), juce::String ("Keep ") + laneKey (ln) + " lane", false);
+    for (int ln = 0; ln < kRolled; ++ln) addBool (l, juce::String ("lock_") + laneKey (ln), juce::String ("Keep ") + laneKey (ln) + " lane", false);
     addFloat  (l, "shake_amt", "Shake amount", { 0.f, 1.f, 0.01f }, 0.25f, pct());
     addFloat  (l, "seq_bpm", "Tempo without a host", { 40.f, 240.f, 0.1f }, 120.f, fmt (" BPM", 1));
     addBool   (l, "seq_run", "Run without a host", false);
@@ -200,6 +201,8 @@ inline juce::AudioProcessorValueTreeState::ParameterLayout createLayout()
             l.add (std::make_unique<juce::AudioParameterInt> (juce::ParameterID { stepId (t, s, LaneRatchet), 1 }, sn + "ratchet", 1, 4, 1));
             addChoice (l, stepId (t, s, LaneDirection), sn + "direction", kDirections, 0);
             addFloat  (l, stepId (t, s, LaneLength),  sn + "length",  { 0.1f, 1.f, 0.001f }, 1.f, pct());
+            addFloat  (l, stepId (t, s, LaneProb),    sn + "chance",  { 0.f, 1.f, 0.001f }, 1.f, pct());
+            addFloat  (l, stepId (t, s, LaneTime),    sn + "timing",  { -0.5f, 0.5f, 0.001f }, 0.f, [] (float v, int) { const int p = juce::roundToInt (v * 100.f); return (p > 0 ? "+" : "") + juce::String (p) + "%"; });
         }
     }
 

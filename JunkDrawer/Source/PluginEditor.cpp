@@ -609,11 +609,11 @@ struct StepGrid : juce::Component, juce::Timer, juce::SettableTooltipClient
     float cellW() const { return ((float) stripW - 6.f - 45.f) / 16.f; }
     float cellX (int i) const { return (float) labelW + 3.f + (float) i * (cellW() + 3.f); }
 
-    static float defaultFor (int ln) { return ln == jd::LaneVolume || ln == jd::LaneLength ? 1.f : (ln == jd::LaneRatchet ? 1.f : 0.f); }
+    static float defaultFor (int ln) { return ln == jd::LaneVolume || ln == jd::LaneLength || ln == jd::LaneProb || ln == jd::LaneRatchet ? 1.f : 0.f; }
 
     void paint (juce::Graphics& g) override
     {
-        static const char* names[] = { "Region", "Volume", "Pitch", "Ratchet", "Direction", "Length" };
+        static const char* names[] = { "Region", "Volume", "Pitch", "Ratchet", "Direction", "Length", "Chance", "Timing" };
         drawText (g, names[lane], { 0, 0, labelW - 6, stripH }, sans (11.f, true), juce::Colour (0xff4a3320));
         drawText (g, "Volume", { 0, overviewY, labelW - 6, overviewH }, sans (11.f, true), juce::Colour (0xff4a3320));
 
@@ -678,6 +678,17 @@ struct StepGrid : juce::Component, juce::Timer, juce::SettableTooltipClient
                 break;
             }
             case jd::LaneRatchet: fill (juce::roundToInt (v) / 4.f); top ("x" + juce::String (juce::roundToInt (v))); break;
+            case jd::LaneProb: fill (v); top (juce::String (juce::roundToInt (v * 100.f))); break;
+            case jd::LaneTime:
+            {
+                const float mid = bar.getCentreY(), y = mid - (v / 0.5f) * (bar.getHeight() * 0.5f);
+                g.setColour (pal::amber);
+                g.fillRect (bar.getX(), juce::jmin (mid, y), bar.getWidth(), juce::jmax (1.5f, std::abs (y - mid)));
+                g.setColour (juce::Colour (0x80f0e2c4)); g.fillRect (bar.getX(), mid, bar.getWidth(), 1.f);
+                const int pc = juce::roundToInt (v * 100.f);
+                top ((pc > 0 ? "+" : "") + juce::String (pc));
+                break;
+            }
             case jd::LaneDirection:
             {
                 const int d = juce::roundToInt (v);
@@ -724,6 +735,8 @@ struct StepGrid : juce::Component, juce::Timer, juce::SettableTooltipClient
             case jd::LaneLength: setStep (i, 0.1f + 0.9f * yn); break;
             case jd::LanePitch:  setStep (i, (float) juce::roundToInt (-12.f + 24.f * yn)); break;
             case jd::LaneRatchet: setStep (i, (float) juce::jlimit (1, 4, 1 + (int) (yn * 4.f))); break;
+            case jd::LaneProb:   setStep (i, std::round (yn * 20.f) / 20.f); break;
+            case jd::LaneTime:   setStep (i, std::round ((yn - 0.5f) * 20.f) / 20.f); break;
             default: break;
         }
     }
@@ -944,9 +957,10 @@ struct Liner : juce::Component, juce::FileDragAndDropTarget
         addAndMakeVisible (wave);
         addAndMakeVisible (grid);
 
-        static const char* laneNames[] = { "Region", "Volume", "Pitch", "Ratchet", "Direction", "Length" };
+        static const char* laneNames[] = { "Region", "Volume", "Pitch", "Ratchet", "Direction", "Length", "Chance", "Timing" };
         static const char* laneTips[] = { "Which region plays on each step", "How loud each step is", "Shifts each step up or down in semitones", "Repeats a step 1 to 4 times",
-                                          "Region keeps the region's own setting, or force forward or backward", "How long each step is held before it lets go" };
+                                          "Region keeps the region's own setting, or force forward or backward", "How long each step is held before it lets go",
+                                          "How likely each step is to play. Below 100 it sometimes skips, the same way every run.", "Pushes each step early or late, by up to half a step" };
         for (int i = 0; i < jd::kLanes; ++i)
         {
             auto& b = tabs[(size_t) i];
@@ -961,7 +975,7 @@ struct Liner : juce::Component, juce::FileDragAndDropTarget
         less.onClick = [this] { nudgeLength (-1); };
         more.onClick = [this] { nudgeLength (1); };
         addAndMakeVisible (less); addAndMakeVisible (more);
-        grid.onChanged = [this] { repaint (460, 262, 212, 34); };
+        grid.onChanged = [this] { repaint (506, 262, 170, 34); };
 
         wave.onPick = [this] (int r) { pick (r); };
         setTrack (0);
@@ -973,7 +987,7 @@ struct Liner : juce::Component, juce::FileDragAndDropTarget
     {
         const int lane = grid.laneIndex();
         setNorm (proc, jd::laneLenId (track, lane), (float) juce::jlimit (1, jd::kSteps, proc.laneLength (track, lane) + d));
-        repaint (460, 262, 212, 34);
+        repaint (506, 262, 170, 34);
     }
 
     void openKeyMenu()
@@ -1042,7 +1056,7 @@ struct Liner : juce::Component, juce::FileDragAndDropTarget
         if (selected >= regionCount()) pick (regionCount() - 1);
         if (loaded && tag == nullptr) buildTag();
         if (! loaded) tag.reset();
-        for (auto* c : std::initializer_list<juce::Component*> { &wave, &grid, &clear, &less, &more, &tabs[0], &tabs[1], &tabs[2], &tabs[3], &tabs[4], &tabs[5], &keyBtn, &matchBtn, &matchAllBtn, tuneKnob.get() })
+        for (auto* c : std::initializer_list<juce::Component*> { &wave, &grid, &clear, &less, &more, &tabs[0], &tabs[1], &tabs[2], &tabs[3], &tabs[4], &tabs[5], &tabs[6], &tabs[7], &keyBtn, &matchBtn, &matchAllBtn, tuneKnob.get() })
             if (c != nullptr) c->setVisible (loaded);
         keyBtn.setButtonText (keyButtonText());
         matchBtn.setEnabled (loaded && proc.trackKey (track).found);
@@ -1070,10 +1084,10 @@ struct Liner : juce::Component, juce::FileDragAndDropTarget
         wave.setBounds (16, 56, 656, 204);
         rec.setBounds (16, 56, 656, 204);
         int x = 16;
-        const int w[] = { 64, 64, 56, 66, 76, 64 };
+        const int w[] = { 58, 58, 50, 58, 66, 58, 50, 58 };
         for (int i = 0; i < jd::kLanes; ++i) { tabs[(size_t) i].setBounds (x, 268, w[i], 24); x += w[i] + 5; }
-        less.setBounds (528, 268, 26, 24);
-        more.setBounds (590, 268, 26, 24);
+        less.setBounds (552, 268, 24, 24);
+        more.setBounds (610, 268, 24, 24);
         grid.setBounds (16, 300, 656, 102);
         if (tag != nullptr) tag->setBounds (getWidth() - 216 - 12, 10, 216, 406);
     }
@@ -1087,7 +1101,7 @@ struct Liner : juce::Component, juce::FileDragAndDropTarget
         g.setColour (juce::Colour (0x99281608));
         g.drawRect (r, 1.f);
 
-        padBehind (g, { &keyBtn, &matchAllBtn, &matchBtn, &browse, &record, &clear, &tabs[0], &tabs[1], &tabs[2], &tabs[3], &tabs[4], &tabs[5], &less, &more });
+        padBehind (g, { &keyBtn, &matchAllBtn, &matchBtn, &browse, &record, &clear, &tabs[0], &tabs[1], &tabs[2], &tabs[3], &tabs[4], &tabs[5], &tabs[6], &tabs[7], &less, &more });
 
         auto td = proc.getTrack (track);
         if (td == nullptr && ! recOpen)
@@ -1107,10 +1121,10 @@ struct Liner : juce::Component, juce::FileDragAndDropTarget
             const float tune = plainValue (proc, jd::trackId (track, "tune"));
             drawText (g, "Tune", { 392, 31, 72, 12 }, sans (11.f, true), ink.withAlpha (0.85f));
             drawText (g, (tune > 0.05f ? "+" : "") + juce::String (tune, 1) + " st", { 392, 42, 72, 12 }, mono (11.f), ink);
-            drawText (g, "Steps", { 462, 268, 62, 24 }, sans (11.f, true), ink.withAlpha (0.85f), juce::Justification::centredRight);
-            drawText (g, juce::String (proc.laneLength (track, grid.laneIndex())), { 554, 268, 36, 24 }, mono (13.f, true), ink, juce::Justification::centred);
+            drawText (g, "Steps", { 512, 268, 38, 24 }, sans (11.f, true), ink.withAlpha (0.85f), juce::Justification::centredRight);
+            drawText (g, juce::String (proc.laneLength (track, grid.laneIndex())), { 578, 268, 30, 24 }, mono (13.f, true), ink, juce::Justification::centred);
             const int feel = juce::jlimit (0, 2, juce::roundToInt (plainValue (proc, "seq_feel")));
-            drawText (g, jd::kStepDivs[juce::jlimit (0, 3, juce::roundToInt (plainValue (proc, "seq_div")))] + (feel == 1 ? "d" : feel == 2 ? "t" : ""), { 620, 268, 52, 24 }, mono (11.f), ink.withAlpha (0.8f), juce::Justification::centredRight);
+            drawText (g, jd::kStepDivs[juce::jlimit (0, 3, juce::roundToInt (plainValue (proc, "seq_div")))] + (feel == 1 ? "d" : feel == 2 ? "t" : ""), { 636, 268, 36, 24 }, mono (11.f), ink.withAlpha (0.8f), juce::Justification::centredRight);
         }
         if (message.isNotEmpty())
             drawText (g, message, { 16, td == nullptr ? 350 : 404, 656, 18 }, sans (12.f), juce::Colour (0xff7a2e16), td == nullptr ? juce::Justification::centred : juce::Justification::centredLeft);
@@ -1173,7 +1187,7 @@ struct Junk : juce::Component
         shakeBtn.onClick = [this] { proc.shake (track); };
         shakeAmt = std::make_unique<Knob> (s, "shake_amt", "Amount", 38, juce::Colour (0xff2a1b10), juce::Colour (0xff5a4329));
         static const char* lockNames[] = { "Region", "Volume", "Pitch", "Ratchet", "Dir", "Length" };
-        for (int i = 0; i < jd::kLanes; ++i)
+        for (int i = 0; i < jd::kRolled; ++i)
         {
             keep[(size_t) i].setButtonText (lockNames[i]); keep[(size_t) i].setClickingTogglesState (true);
             keep[(size_t) i].setTooltip ("Lit lanes are kept as they are when you Rummage or Shake");
@@ -1214,7 +1228,7 @@ struct Junk : juce::Component
         rummage.setBounds (kx, 14 + 34, 88, 26);
         shakeBtn.setBounds (kx + 94, 14 + 34, 88, 26);
         shakeAmt->setBounds (466 + 69, 14 + 66, 76, 76);
-        for (int i = 0; i < jd::kLanes; ++i)
+        for (int i = 0; i < jd::kRolled; ++i)
             keep[(size_t) i].setBounds (kx + (i % 3) * 62, 14 + 168 + (i / 3) * 26, 58, 24);
 
         const int rx = 240 + 16;
@@ -1263,8 +1277,8 @@ struct Junk : juce::Component
     std::unique_ptr<Seg> div, feel, snap;
     std::unique_ptr<Knob> swing, tempo, shakeAmt;
     juce::TextButton rummage, shakeBtn;
-    std::array<juce::TextButton, jd::kLanes> keep;
-    std::array<std::unique_ptr<juce::ButtonParameterAttachment>, jd::kLanes> keepAtt;
+    std::array<juce::TextButton, jd::kRolled> keep;
+    std::array<std::unique_ptr<juce::ButtonParameterAttachment>, jd::kRolled> keepAtt;
     juce::TextButton run, sliceEq, sliceHit, add, sub, play, stop;
     std::unique_ptr<juce::ButtonParameterAttachment> runAtt;
 };

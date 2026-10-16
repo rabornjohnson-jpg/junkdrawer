@@ -275,6 +275,47 @@ int main()
     check (win (o, 100, 900) > 0.05f && win (o, 1100, 1450) < 1.0e-5f && win (o, 1600, 2300) > 0.05f && win (o, 3100, 3800) > 0.05f && win (o, 4600, 5300) > 0.05f, "a ratchet of 4 plays four hits inside the step");
     setP (sq, jd::stepId (0, 0, jd::LaneRatchet), 1.f);
 
+    // chance and timing
+    {
+        auto restart = [&] { setP (sq, "seq_run", 0.f); run (sq, 0.1, rate); setP (sq, "seq_run", 1.f); };
+        restart();
+        onlySteps ({ 2 });
+        setP (sq, jd::stepId (0, 2, jd::LaneTime), 0.5f);
+        o = run (sq, 0.4, rate);
+        check (win (o, 12100, 14800) < 1.0e-5f && win (o, 15100, 15900) > 0.05f, "a step pushed late by half a step starts 3000 samples later");
+        setP (sq, jd::stepId (0, 2, jd::LaneTime), -0.5f);
+        restart();
+        o = run (sq, 0.4, rate);
+        check (win (o, 9100, 9900) > 0.05f && win (o, 12100, 12900) < 1.0e-5f, "a step pushed early starts 3000 samples sooner");
+        setP (sq, jd::stepId (0, 2, jd::LaneTime), 0.f);
+        restart();
+        o = run (sq, 0.4, rate);
+        check (win (o, 12100, 12900) > 0.05f && win (o, 9100, 9900) < 1.0e-5f, "with timing back at zero it is on the grid again");
+
+        onlySteps ({ 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15 });
+        for (int k = 0; k < jd::kSteps; ++k) setP (sq, jd::stepId (0, k, jd::LaneProb), 0.f);
+        restart();
+        o = run (sq, 1.0, rate);
+        check (rms (o) < 1.0e-6f, "chance at zero plays nothing");
+        for (int k = 0; k < jd::kSteps; ++k) setP (sq, jd::stepId (0, k, jd::LaneProb), 0.5f);
+        restart();
+        o = run (sq, 4.0, rate);                                              // 32 steps
+        int played = 0;
+        for (int k = 0; k < 32; ++k) played += win (o, k * 6000 + 100, k * 6000 + 900) > 0.05f ? 1 : 0;
+        check (played >= 6 && played <= 26, "chance at one half plays some steps and skips others");
+        restart();
+        auto o2 = run (sq, 4.0, rate);
+        bool same = true;
+        for (int k = 0; k < 32; ++k) same = same && (win (o, k * 6000 + 100, k * 6000 + 900) > 0.05f) == (win (o2, k * 6000 + 100, k * 6000 + 900) > 0.05f);
+        check (same, "the dice are the same on every run");
+        for (int k = 0; k < jd::kSteps; ++k) setP (sq, jd::stepId (0, k, jd::LaneProb), 1.f);
+        restart();
+        o = run (sq, 1.0, rate);
+        check (win (o, 100, 900) > 0.05f && win (o, 6100, 6900) > 0.05f, "chance back at full plays every step");
+        onlySteps ({ 0, 2 });
+        setP (sq, "seq_run", 0.f);
+    }
+
     setP (sq, "seq_run", 0.f); run (sq, 0.1, rate); setP (sq, "seq_run", 1.f);
     onlySteps ({ 0, 1 });
     setP (sq, "m_swing", 0.75f);
