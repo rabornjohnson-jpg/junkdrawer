@@ -812,6 +812,20 @@ struct Junk : juce::Component
         run.setTooltip ("Runs the pattern without a host. In a DAW the host's play button drives it.");
         runAtt = std::make_unique<juce::ButtonParameterAttachment> (*s.getParameter ("seq_run"), run, nullptr);
         snap = std::make_unique<Seg> (s, "snap", juce::StringArray { "Off", "Hit", "Zero" });
+        rummage.setButtonText ("Rummage"); rummage.setTooltip ("Rummage through the drawer: re-roll every step on this track, except the lanes you keep");
+        shakeBtn.setButtonText ("Shake");  shakeBtn.setTooltip ("Shake the drawer: re-roll only some of the steps. The Amount knob sets how many.");
+        rummage.onClick = [this] { proc.rummage (track); };
+        shakeBtn.onClick = [this] { proc.shake (track); };
+        shakeAmt = std::make_unique<Knob> (s, "shake_amt", "Amount", 38, juce::Colour (0xff2a1b10), juce::Colour (0xff5a4329));
+        static const char* lockNames[] = { "Region", "Volume", "Pitch", "Ratchet", "Dir", "Length" };
+        for (int i = 0; i < jd::kLanes; ++i)
+        {
+            keep[(size_t) i].setButtonText (lockNames[i]); keep[(size_t) i].setClickingTogglesState (true);
+            keep[(size_t) i].setTooltip ("Lit lanes are kept as they are when you Rummage or Shake");
+            keepAtt[(size_t) i] = std::make_unique<juce::ButtonParameterAttachment> (*s.getParameter (juce::String ("lock_") + jd::laneKey (i)), keep[(size_t) i], nullptr);
+            addAndMakeVisible (keep[(size_t) i]);
+        }
+        addAndMakeVisible (rummage); addAndMakeVisible (shakeBtn); addAndMakeVisible (*shakeAmt);
         snap->setTooltip ("Off: edges go where you drop them. Hit: they stick to the nearest loud hit. Zero: they stick to the nearest quiet crossing, so there are no clicks.");
 
         sliceEq.setButtonText ("Slice equal");     sliceEq.setTooltip ("Cut the sound into equal regions");
@@ -841,6 +855,13 @@ struct Junk : juce::Component
         tempo->setBounds (14 + 118, 14 + 96, 76, 76);
         run.setBounds (14 + 16, 14 + 184, 86, 28);
 
+        const int kx = 466 + 16;
+        rummage.setBounds (kx, 14 + 34, 88, 26);
+        shakeBtn.setBounds (kx + 94, 14 + 34, 88, 26);
+        shakeAmt->setBounds (466 + 69, 14 + 66, 76, 76);
+        for (int i = 0; i < jd::kLanes; ++i)
+            keep[(size_t) i].setBounds (kx + (i % 3) * 62, 14 + 168 + (i / 3) * 26, 58, 24);
+
         const int rx = 240 + 16;
         sliceEq.setBounds (rx, 14 + 34, 88, 26);
         sliceHit.setBounds (rx + 94, 14 + 34, 88, 26);
@@ -864,26 +885,31 @@ struct Junk : juce::Component
         g.fillRect (getLocalBounds());
         card (g, { 14.f, 14.f, 214.f, 222.f }, "PATTERN");
         card (g, { 240.f, 14.f, 214.f, 222.f }, "REGIONS");
-        padBehind (g, { div.get(), feel.get(), &run, snap.get(), &sliceEq, &sliceHit, &add, &sub, &play, &stop });
+        card (g, { 466.f, 14.f, 214.f, 222.f }, "RUMMAGE");
+        drawText (g, "Keep these lanes", { 466 + 16, 14 + 148, 182, 16 }, sans (11.f, true), juce::Colour (0xff5a4329));
+        padBehind (g, { &rummage, &shakeBtn, &keep[0], &keep[1], &keep[2], &keep[3], &keep[4], &keep[5], div.get(), feel.get(), &run, snap.get(), &sliceEq, &sliceHit, &add, &sub, &play, &stop });
         drawText (g, "Snap edges to", { 240 + 16, 14 + 104, 182, 18 }, sans (11.f, true), juce::Colour (0xff5a4329));
 
-        const juce::Rectangle<float> plate (470.f, 50.f, 424.f, 150.f);
+        const juce::Rectangle<float> plate (694.f, 50.f, 200.f, 150.f);
         g.setGradientFill (juce::ColourGradient (juce::Colour (0xffe6cd84), plate.getX(), plate.getY(), juce::Colour (0xff8a6728), plate.getRight(), plate.getBottom(), false));
         g.fillRoundedRectangle (plate, 3.f);
         g.setColour (juce::Colour (0xff4a3413)); g.drawRoundedRectangle (plate.reduced (0.5f), 3.f, 1.f);
         g.setColour (juce::Colour (0x59ffe9a8)); g.drawRoundedRectangle (plate.reduced (3.f), 2.f, 1.f);
         const auto ink2 = juce::Colour (0xff3a2606);
         g.setOpacity (0.85f);
-        drawLogo (g, { 490, 78, 100, 50 });
-        drawText (g, "FADING FRACTAL AUDIO", { 604, 84, 280, 16 }, sans (12.f, true).withExtraKerningFactor (0.14f), ink2);
-        drawText (g, "Junk Drawer", { 604, 102, 280, 40 }, serif (30.f), ink2);
-        drawText (g, "EIGHT-TRACK SAMPLE SEQUENCER", { 604, 146, 280, 16 }, sans (11.f, true).withExtraKerningFactor (0.1f), ink2);
+        drawLogo (g, { 744, 60, 100, 44 });
+        drawText (g, "FADING FRACTAL AUDIO", { 700, 108, 188, 14 }, sans (10.f, true).withExtraKerningFactor (0.1f), ink2, juce::Justification::centred);
+        drawText (g, "Junk Drawer", { 700, 122, 188, 36 }, serif (28.f), ink2, juce::Justification::centred);
+        drawText (g, "SAMPLE SEQUENCER", { 700, 162, 188, 14 }, sans (10.f, true).withExtraKerningFactor (0.1f), ink2, juce::Justification::centred);
     }
 
     Proc& proc;
     int track = 0;
     std::unique_ptr<Seg> div, feel, snap;
-    std::unique_ptr<Knob> swing, tempo;
+    std::unique_ptr<Knob> swing, tempo, shakeAmt;
+    juce::TextButton rummage, shakeBtn;
+    std::array<juce::TextButton, jd::kLanes> keep;
+    std::array<std::unique_ptr<juce::ButtonParameterAttachment>, jd::kLanes> keepAtt;
     juce::TextButton run, sliceEq, sliceHit, add, sub, play, stop;
     std::unique_ptr<juce::ButtonParameterAttachment> runAtt;
 };

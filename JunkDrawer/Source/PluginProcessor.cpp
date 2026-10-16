@@ -459,6 +459,35 @@ void JunkDrawerProcessor::fillPatternIfEmpty (int track)
     for (int s = 0; s < jd::kSteps; ++s) setParam (state, jd::stepId (track, s, jd::LaneRegion), (float) (s % count + 1));
 }
 
+static float rollStep (juce::Random& rnd, int lane, int regions)
+{
+    switch (lane)
+    {
+        case jd::LaneRegion:  return rnd.nextFloat() < 0.65f ? (float) (1 + rnd.nextInt (juce::jmax (1, regions))) : 0.f;
+        case jd::LaneVolume:  return std::round ((0.45f + 0.55f * rnd.nextFloat()) * 20.f) / 20.f;
+        case jd::LanePitch:   { static const float p[] = { 0, 0, 0, 0, 0, 3, 5, 7, 12, -5, -12 }; return p[rnd.nextInt (11)]; }
+        case jd::LaneRatchet: return rnd.nextFloat() < 0.8f ? 1.f : (float) (2 + rnd.nextInt (3));
+        case jd::LaneDirection: return rnd.nextFloat() < 0.75f ? 0.f : (float) (1 + rnd.nextInt (2));
+        default:              return std::round ((0.4f + 0.6f * rnd.nextFloat()) * 20.f) / 20.f;
+    }
+}
+
+void JunkDrawerProcessor::rollSteps (int track, float chance)
+{
+    if (juce::roundToInt (regCount[(size_t) track]->load()) < 1) return;
+    juce::Random rnd;
+    const int regions = juce::roundToInt (regCount[(size_t) track]->load());
+    for (int ln = 0; ln < jd::kLanes; ++ln)
+    {
+        if (state.getRawParameterValue (juce::String ("lock_") + jd::laneKey (ln))->load() > 0.5f) continue;
+        for (int s = 0; s < jd::kSteps; ++s)
+            if (chance >= 1.f || rnd.nextFloat() < chance) setParam (state, jd::stepId (track, s, ln), rollStep (rnd, ln, regions));
+    }
+    sendChangeMessage();
+}
+
+void JunkDrawerProcessor::shake (int track) { rollSteps (track, state.getRawParameterValue ("shake_amt")->load()); }
+
 //==============================================================================
 // LFOs.  Everything here runs once per block, so ten assignments or a hundred cost about the same.
 void JunkDrawerProcessor::evalTargets()

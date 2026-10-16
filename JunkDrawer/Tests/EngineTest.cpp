@@ -482,6 +482,28 @@ int main()
         check (lr.getMods().size() == 1 && lr.modAmount ("fx_filter_cut", 3) == -0.4f, "assignments come back when a project is reloaded");
     }
 
+    std::printf ("Rummage\n");
+    {
+        auto steps = [&] (int lane) { std::vector<float> v; for (int k = 0; k < jd::kSteps; ++k) v.push_back (proc.state.getRawParameterValue (jd::stepId (0, k, lane))->load()); return v; };
+        setP (proc, "lock_vol", 1.f);
+        for (int k = 0; k < jd::kSteps; ++k) setP (proc, jd::stepId (0, k, jd::LaneVolume), 0.3f);
+        proc.rummage (0);
+        bool volSame = true; for (auto x : steps (jd::LaneVolume)) volSame = volSame && std::abs (x - 0.3f) < 1e-4f;
+        check (volSame, "a kept lane is left alone");
+        const auto reg = steps (jd::LaneRegion);
+        const int nreg = juce::roundToInt (proc.state.getRawParameterValue ("t1_regions")->load());
+        bool inRange = true; int moved = 0;
+        for (auto x : reg) { inRange = inRange && x >= 0 && x <= (float) nreg; moved += x != 0; }
+        check (inRange, "rummaged regions stay within the track's regions");
+        setP (proc, "lock_vol", 0.f);
+        setP (proc, "shake_amt", 0.f);
+        const auto before = steps (jd::LanePitch);
+        proc.shake (0);
+        check (steps (jd::LanePitch) == before, "shaking with the amount at zero changes nothing");
+        proc.rummage (0);
+        check (steps (jd::LaneVolume) != std::vector<float> (jd::kSteps, 0.3f), "an unkept lane gets re-rolled");
+    }
+
     proc.clearTrack (0);
     check (proc.getTrack (0) == nullptr, "clearing a track empties it");
 

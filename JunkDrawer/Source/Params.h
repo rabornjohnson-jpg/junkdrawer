@@ -152,6 +152,8 @@ inline juce::AudioProcessorValueTreeState::ParameterLayout createLayout()
     // ---- Sequencer (global) ---------------------------------------------------------------------------------------
     addChoice (l, "seq_div", "Step length", kStepDivs, 2);
     addChoice (l, "seq_feel", "Step feel", kStepFeels, 0);
+    for (int ln = 0; ln < kLanes; ++ln) addBool (l, juce::String ("lock_") + laneKey (ln), juce::String ("Keep ") + laneKey (ln) + " lane", false);
+    addFloat  (l, "shake_amt", "Shake amount", { 0.f, 1.f, 0.01f }, 0.25f, pct());
     addFloat  (l, "seq_bpm", "Tempo without a host", { 40.f, 240.f, 0.1f }, 120.f, fmt (" BPM", 1));
     addBool   (l, "seq_run", "Run without a host", false);
 

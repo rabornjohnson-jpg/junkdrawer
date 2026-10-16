@@ -158,6 +158,12 @@ private:
     bool seqWasRunning = false;
     void applyStep (int track, SeqTrack& q, long long step) const;
     void fillPatternIfEmpty (int track);
+public:
+    // Rummage re-rolls every step of every lane that is not kept. Shake re-rolls only some of them (the Shake amount).
+    void rummage (int track)  { rollSteps (track, 1.f); }
+    void shake (int track);
+private:
+    void rollSteps (int track, float chance);
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (JunkDrawerProcessor)
 };
