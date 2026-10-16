@@ -45,6 +45,8 @@ void JunkDrawerProcessor::prepareToPlay (double sampleRate, int)
     volume.setCurrentAndTargetValue (juce::Decibels::decibelsToGain (pVolume->load()));
     pan.setCurrentAndTargetValue (pPan->load());
     for (auto& v : voices) { v.prepare (sampleRate); v.kill(); }
+    fxFilter.prepare (sampleRate); fxDelay.prepare (sampleRate); fxReverb.prepare (sampleRate); fxLimiter.prepare (sampleRate);
+    for (auto& b : wasOn) b = false;
 
     if (rateChanged)                                          // samples are stored at the session rate, so a new rate means reading them again
         for (int t = 0; t < jd::kTracks; ++t)
@@ -277,6 +279,8 @@ void JunkDrawerProcessor::processBlock (juce::AudioBuffer<float>& buf, juce::Mid
     const double beats = jd::stepBeats (juce::roundToInt (pDiv->load()));
     const double u0 = ppq0 * rate / beats, dU = dppq * rate / beats;
     const double swing = pSwing->load();
+    static const float ranges[] = { 12.f, 24.f, 48.f };
+    const float masterPitch = juce::jlimit (-ranges[juce::jlimit (0, 2, juce::roundToInt (state.getRawParameterValue ("m_pitchrange")->load()))], ranges[juce::jlimit (0, 2, juce::roundToInt (state.getRawParameterValue ("m_pitchrange")->load()))], state.getRawParameterValue ("m_pitch")->load());
 
     auto renderVoices = [&] (int from, int to)
     {
@@ -328,7 +332,7 @@ void JunkDrawerProcessor::processBlock (juce::AudioBuffer<float>& buf, juce::Mid
                 }
                 if (d == nullptr) continue;
                 auto s = readRegion (t, q.region - 1);
-                s.pitch += q.pitch;
+                s.pitch += q.pitch + masterPitch;
                 if (q.dir == 1) s.reverse = false; else if (q.dir == 2) s.reverse = true;
                 const float g = juce::Decibels::decibelsToGain (tp[(size_t) t].level->load(), -59.f) * q.vol;
                 voices[(size_t) t].trigger (std::move (d), s, g, tp[(size_t) t].pan->load());
@@ -348,7 +352,41 @@ void JunkDrawerProcessor::processBlock (juce::AudioBuffer<float>& buf, juce::Mid
     renderVoices (segStart, n);
     for (int t = 0; t < jd::kTracks; ++t) playing[(size_t) t].store (voices[(size_t) t].isActive() ? 1 : 0);
 
-    // 4. master volume and pan, then the meter
+    // 4. effects, each skipped while it is off (and cleared when it comes back on, so no old tail jumps out)
+    {
+        auto P = [&] (const char* id) { return state.getRawParameterValue (id)->load(); };
+        if (P ("fx_filter_on") > 0.5f)
+        {
+            if (! wasOn[0]) fxFilter.reset();
+            fxFilter.set (juce::roundToInt (P ("fx_filter_type")), P ("fx_filter_cut"), P ("fx_filter_res"), P ("fx_filter_drive"), P ("fx_filter_mix"), juce::roundToInt (P ("fx_filter_slope")));
+            fxFilter.process (l, r, n);
+            wasOn[0] = true;
+        } else wasOn[0] = false;
+        if (P ("fx_delay_on") > 0.5f)
+        {
+            if (! wasOn[1]) fxDelay.reset();
+            fxDelay.set (juce::roundToInt (P ("fx_delay_mode")), P ("fx_delay_time"), bpm, P ("fx_delay_fb"), P ("fx_delay_tone"), P ("fx_delay_mix"), juce::roundToInt (P ("fx_delay_style")) == 1);
+            fxDelay.process (l, r, n);
+            wasOn[1] = true;
+        } else wasOn[1] = false;
+        if (P ("fx_reverb_on") > 0.5f)
+        {
+            if (! wasOn[2]) fxReverb.reset();
+            fxReverb.set (juce::roundToInt (P ("fx_reverb_mode")), P ("fx_reverb_size"), P ("fx_reverb_decay"), P ("fx_reverb_damp"), P ("fx_reverb_mix"), juce::roundToInt (P ("fx_reverb_pre")));
+            fxReverb.process (l, r, n);
+            wasOn[2] = true;
+        } else wasOn[2] = false;
+
+        const float width = P ("m_width");
+        if (std::abs (width - 1.f) > 0.002f)
+            for (int i = 0; i < n; ++i)
+            {
+                const float m = 0.5f * (l[i] + r[i]), s = 0.5f * (l[i] - r[i]) * width;
+                l[i] = m + s; r[i] = m - s;
+            }
+    }
+
+    // 5. master volume and pan
     float pl = 0.f, pr = 0.f;
     for (int i = 0; i < n; ++i)
     {
@@ -357,9 +395,16 @@ void JunkDrawerProcessor::processBlock (juce::AudioBuffer<float>& buf, juce::Mid
         const float a = (p + 1.f) * 0.25f * juce::MathConstants<float>::pi;
         l[i] *= g * std::cos (a) * 1.41421356f;
         r[i] *= g * std::sin (a) * 1.41421356f;
-        pl = juce::jmax (pl, std::abs (l[i]));
-        pr = juce::jmax (pr, std::abs (r[i]));
     }
+    if (state.getRawParameterValue ("fx_lim_on")->load() > 0.5f)
+    {
+        auto P = [&] (const char* id) { return state.getRawParameterValue (id)->load(); };
+        if (! wasOn[3]) fxLimiter.reset();
+        fxLimiter.set (juce::roundToInt (P ("fx_lim_mode")) == 1, P ("fx_lim_ceiling"), P ("fx_lim_release"), P ("fx_lim_input"), P ("fx_lim_mix"), juce::roundToInt (P ("fx_lim_look")));
+        fxLimiter.process (l, r, n);
+        wasOn[3] = true;
+    } else wasOn[3] = false;
+    for (int i = 0; i < n; ++i) { pl = juce::jmax (pl, std::abs (l[i])); pr = juce::jmax (pr, std::abs (r[i])); }
     if (pl > peakL.load (std::memory_order_relaxed)) peakL.store (pl, std::memory_order_relaxed);
     if (pr > peakR.load (std::memory_order_relaxed)) peakR.store (pr, std::memory_order_relaxed);
 }

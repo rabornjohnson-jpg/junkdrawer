@@ -2,6 +2,7 @@
 #include "Params.h"
 #include "Voice.h"
 #include "Sequencer.h"
+#include "Effects.h"
 
 class JunkDrawerProcessor : public juce::AudioProcessor, public juce::ChangeBroadcaster
 {
@@ -108,6 +109,8 @@ private:
         bool released = true, noGate = false, fromSeq = false;
     };
     std::array<SeqTrack, jd::kTracks> seq;
+    jd::FxFilter fxFilter; jd::FxDelay fxDelay; jd::FxReverb fxReverb; jd::FxLimiter fxLimiter;
+    bool wasOn[4] = { false, false, false, false };
     double internalPpq = 0.0;
     bool seqWasRunning = false;
     void applyStep (int track, SeqTrack& q, long long step) const;

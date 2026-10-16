@@ -84,6 +84,11 @@ void setP (JunkDrawerProcessor& p, const juce::String& id, float v)
     auto* prm = p.state.getParameter (id);
     prm->setValueNotifyingHost (prm->convertTo0to1 (v));
 }
+
+void fxOff (JunkDrawerProcessor& p)
+{
+    for (auto id : { "fx_filter_on", "fx_delay_on", "fx_reverb_on", "fx_lim_on" }) setP (p, id, 0.f);
+}
 } // namespace
 
 int main()
@@ -93,6 +98,7 @@ int main()
     JunkDrawerProcessor proc;
     proc.prepareToPlay (rate, 256);
     setP (proc, "m_volume", 0.f);
+    fxOff (proc);
 
     std::printf ("Loading\n");
     const std::vector<double> hits { 0.10, 0.60, 1.10, 1.60 };
@@ -234,6 +240,7 @@ int main()
     JunkDrawerProcessor sq;
     sq.prepareToPlay (rate, 256);
     setP (sq, "m_volume", 0.f);
+    fxOff (sq);
     setP (sq, "seq_bpm", 120.f);                                  // 1/16 steps are then 6000 samples long at 48 kHz
     sq.loadFile (0, tone);
     check (waitForTrack (sq, 0), "the tone loads");
@@ -297,6 +304,81 @@ int main()
     setP (sq, "seq_run", 0.f);
     check (rms (run (sq, 0.2, rate)) < 1.0e-5f, "stopping the sequencer silences it");
     check (sq.uiStep.load() == -1, "and the editor sees it stopped");
+
+    // ------------------------------------------------------------------------------------------------------------
+    std::printf ("Effects\n");
+    {
+        JunkDrawerProcessor fp;
+        fp.prepareToPlay (rate, 256);
+        setP (fp, "m_volume", 0.f);
+        fxOff (fp);
+        fp.loadFile (0, tone);
+        check (waitForTrack (fp, 0), "the tone loads for the effects tests");
+        fp.sliceEqual (0, 1);
+        for (int s = 0; s < jd::kSteps; ++s) setP (fp, jd::stepId (0, s, jd::LaneRegion), s == 0 ? 1.f : 0.f);
+        setP (fp, "seq_bpm", 120.f);
+        auto hit = [&] (double secs)
+        {
+            setP (fp, "seq_run", 0.f); run (fp, 0.2, rate); setP (fp, "seq_run", 1.f);
+            return run (fp, secs, rate);
+        };
+        auto dry = hit (0.5);
+        const float dryRms = win (dry, 0, 2000);
+
+        setP (fp, "fx_delay_on", 1.f); setP (fp, "fx_delay_mode", 0.f); setP (fp, "fx_delay_time", 100.f);
+        setP (fp, "fx_delay_fb", 0.f); setP (fp, "fx_delay_mix", 1.f); setP (fp, "fx_delay_style", 0.f); setP (fp, "fx_delay_tone", 16000.f);
+        auto d = hit (0.5);
+        check (win (d, 4900, 6000) > 0.05f && win (d, 2000, 4500) < 0.01f, "a 100 ms delay repeats the hit 4800 samples later");
+        setP (fp, "fx_delay_on", 0.f);
+
+        setP (fp, "fx_reverb_on", 1.f); setP (fp, "fx_reverb_mix", 1.f); setP (fp, "fx_reverb_size", 0.8f); setP (fp, "fx_reverb_pre", 0.f);
+        auto v = hit (0.6);
+        check (win (v, 3000, 12000) > 0.003f && win (v, 3000, 12000) < dryRms, "the reverb adds a tail after the hit");
+        setP (fp, "fx_reverb_on", 0.f);
+
+        setP (fp, "fx_filter_on", 1.f); setP (fp, "fx_filter_type", 0.f); setP (fp, "fx_filter_cut", 200.f); setP (fp, "fx_filter_mix", 1.f); setP (fp, "fx_filter_drive", 0.f);
+        auto f = hit (0.3);
+        check (win (f, 0, 900) < dryRms * 0.5f, "a low pass at 200 Hz takes a 760 Hz tone down");
+        setP (fp, "fx_filter_type", 2.f); setP (fp, "fx_filter_cut", 4000.f);
+        f = hit (0.3);
+        check (win (f, 0, 900) < dryRms * 0.5f, "and a high pass at 4 kHz does too");
+        setP (fp, "fx_filter_on", 0.f);
+
+        setP (fp, "m_width", 0.f);
+        {
+            fp.loadFile (1, tone);
+            check (waitForTrack (fp, 1), "a second tone loads");
+            fp.sliceEqual (1, 1);
+            setP (fp, "t2_pan", -1.f);
+            for (int s = 0; s < jd::kSteps; ++s) setP (fp, jd::stepId (1, s, jd::LaneRegion), s == 0 ? 1.f : 0.f);
+            setP (fp, "t1_mute", 1.f);
+            auto w0 = hit (0.2);
+            float diff = 0.f;
+            for (int i = 0; i < 900; ++i) diff = juce::jmax (diff, std::abs (w0.getSample (0, i) - w0.getSample (1, i)));
+            check (diff < 1.0e-4f && win (w0, 0, 900) > 0.05f, "width 0 makes the output mono");
+            setP (fp, "t1_mute", 0.f); setP (fp, "t2_pan", 0.f); setP (fp, "m_width", 1.f);
+            setP (fp, "t2_mute", 1.f);
+        }
+
+        setP (fp, "m_volume", 6.f);
+        setP (fp, "fx_lim_on", 1.f); setP (fp, "fx_lim_mode", 1.f); setP (fp, "fx_lim_ceiling", -12.f); setP (fp, "fx_lim_input", 0.f); setP (fp, "fx_lim_mix", 1.f); setP (fp, "fx_lim_look", 2.f);
+        auto lim = hit (0.3);
+        float peak = 0.f;
+        for (int i = 0; i < lim.getNumSamples(); ++i) peak = juce::jmax (peak, std::abs (lim.getSample (0, i)));
+        check (peak <= juce::Decibels::decibelsToGain (-12.f) + 0.002f && peak > 0.2f, "the limiter holds the output at its -12 dB ceiling");
+        setP (fp, "m_volume", 0.f);
+        setP (fp, "fx_lim_on", 0.f);
+        auto bypass = hit (0.3);
+        check (std::abs (win (bypass, 0, 2000) - dryRms) < 0.002f, "with every effect off the hit comes through untouched");
+
+        const double t0c = (double) juce::Time::getMillisecondCounter();
+        setP (fp, "fx_filter_on", 1.f); setP (fp, "fx_delay_on", 1.f); setP (fp, "fx_reverb_on", 1.f); setP (fp, "fx_lim_on", 1.f);
+        setP (fp, "fx_filter_cut", 3000.f); setP (fp, "fx_filter_type", 0.f);
+        run (fp, 10.0, rate);
+        const double ms = (double) juce::Time::getMillisecondCounter() - t0c;
+        std::printf ("  note  10 s of audio with every effect on took %.0f ms (%.1f percent of one core)\n", ms, ms / 100.0);
+        check (ms < 3000.0, "all four effects together run far faster than real time");
+    }
 
     proc.clearTrack (0);
     check (proc.getTrack (0) == nullptr, "clearing a track empties it");

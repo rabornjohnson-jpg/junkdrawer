@@ -49,4 +49,5 @@ No text below 11 px. No overlapping or crowded text. American English. Every con
 
 - Stage 1-2 done: load a sample into any of the 8 tracks (Browse or drag and drop), cut it into up to 6 regions (equal, by hits, or by hand with edge snapping), and audition regions and the whole sample. Each region has pitch, gain, pan, filter, drive, ADSR, loop mode and reverse.
 - Stage 3 done: a step sequencer. Six lanes per track (Region, Volume, Pitch, Ratchet, Direction, Length), each with its own length of 1 to 16 steps so lanes can run against each other. Step length (1/4 to 1/32), swing and rate are global. It follows the host transport, or runs on its own clock in the standalone app.
-- Next: the LFO and Matrix engine, the Master page effects, recording, and the 100 factory drawers.
+- Stage 6 engine done: Master page effects. Filter (low, band, high pass, notch; 12 or 24 dB), Delay (free, synced, dotted, triplet; mono or ping-pong), Reverb (room, hall, plate, spring; Freeverb-based for now), Limiter (soft or hard, with lookahead), plus Width and Master Pitch. Each effect costs nothing while it is off.
+- Next: recording (needs its mockup), the LFO and Matrix engine (needs the Matrix page mockup), and the 100 factory drawers.
