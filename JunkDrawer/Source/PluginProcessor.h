@@ -81,6 +81,8 @@ public:
     void loadDrawer (int index);
     void stepDrawer (int by) { const int n = drawerCount(); loadDrawer (((drawerIndex < 0 ? (by > 0 ? -1 : 0) : drawerIndex) + by + n) % n); }
     bool saveDrawer (const juce::String& name);
+    bool renameDrawer (int index, const juce::String& name);      // saved drawers only
+    bool deleteDrawer (int index);                                // saved drawers only
     void reloadUserDrawers();
 
     // Offline export support: an export runs a second processor of its own (see Exporter.h).

@@ -108,7 +108,7 @@ Step-lane engine, LFO engine, file loading, DAW recording pipeline. Pull these i
 - Tests: all file type x bit depth x rate combinations read back correctly (format, length, level, size estimate); bars/time lengths and the 30 minute cap; fade reaches silence without clicks; ring-out keeps tails and ends in silence; 16-bit dither error about 0.7 of a 16-bit step; disk-space refusal; options saved and restored; stems sum to the master mix; LFOs keep moving across a long export.
 
 ### Stage 8: Polish
-- 100 factory presets ("drawers"), organized by feel. BUILT (generated in code, Presets.h): 10 groups of 10. A drawer keeps every setting except sample files, region counts and region edges. Header bar steps with the arrows and opens a grouped menu; "Save this drawer as..." writes user drawers to the app data folder (Mine). Hosts see them as programs. Not done: rename/delete user drawers, import/export, tuning each factory drawer by ear with real sounds.
+- 100 factory presets ("drawers"), organized by feel. BUILT (generated in code, Presets.h): 10 groups of 10. A drawer keeps every setting except sample files, region counts and region edges. Header bar steps with the arrows and opens a grouped menu; "Save this drawer as..." writes user drawers to the app data folder (Mine). Hosts see them as programs. Rename and delete for saved drawers are in the picker menu. Not done: import/export, tuning each factory drawer by ear with real sounds.
 - Installer, About page, quick-start guide.
 - macOS build.
 - Link/group tracks.

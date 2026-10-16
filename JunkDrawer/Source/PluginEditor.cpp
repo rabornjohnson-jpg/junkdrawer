@@ -213,24 +213,49 @@ struct JunkDrawerEditor::Header : juce::Component, juce::Timer, juce::ChangeList
         }
         m.addSeparator();
         m.addItem (100000, "Save this drawer as...");
+        if (ed.proc.currentDrawer() >= 100)
+        {
+            m.addItem (100001, "Rename this drawer...");
+            m.addItem (100002, "Delete this drawer...");
+        }
         m.showMenuAsync (juce::PopupMenu::Options().withTargetScreenArea (localAreaToGlobal (barArea())).withMinimumWidth (barArea().getWidth()),
                          [this, safe = juce::Component::SafePointer<Header> (this)] (int r)
         {
             if (safe == nullptr || r == 0) return;
-            if (r == 100000) { askName(); return; }
+            if (r == 100000) { askName (false); return; }
+            if (r == 100001) { askName (true); return; }
+            if (r == 100002) { confirmDelete(); return; }
             ed.proc.loadDrawer (r - 1);
         });
     }
 
-    void askName()
+    void confirmDelete()
     {
-        auto* w = new juce::AlertWindow ("Save this drawer", "Give it a name. It will show up under Mine.", juce::MessageBoxIconType::NoIcon);
-        w->addTextEditor ("name", "", "");
+        const int idx = ed.proc.currentDrawer();
+        if (idx < 100) return;
+        juce::AlertWindow::showAsync (juce::MessageBoxOptions().withIconType (juce::MessageBoxIconType::NoIcon).withTitle ("Delete this drawer?")
+                                          .withMessage ("\"" + ed.proc.drawer (idx).name + "\" will be removed from your saved drawers. Your current settings stay as they are.")
+                                          .withButton ("Delete").withButton ("Keep it"),
+                                      [this, safe = juce::Component::SafePointer<Header> (this), idx] (int r)
+        {
+            if (safe != nullptr && r == 1) ed.proc.deleteDrawer (idx);
+        });
+    }
+
+    void askName (bool rename)
+    {
+        auto* w = new juce::AlertWindow (rename ? "Rename this drawer" : "Save this drawer", rename ? "Type the new name." : "Give it a name. It will show up under Mine.", juce::MessageBoxIconType::NoIcon);
+        w->addTextEditor ("name", rename ? ed.proc.drawer (ed.proc.currentDrawer()).name : juce::String(), "");
         w->addButton ("Save", 1, juce::KeyPress (juce::KeyPress::returnKey));
         w->addButton ("Cancel", 0, juce::KeyPress (juce::KeyPress::escapeKey));
-        w->enterModalState (true, juce::ModalCallbackFunction::create ([this, safe = juce::Component::SafePointer<Header> (this), w] (int r)
+        const int idx = ed.proc.currentDrawer();
+        w->enterModalState (true, juce::ModalCallbackFunction::create ([this, safe = juce::Component::SafePointer<Header> (this), w, rename, idx] (int r)
         {
-            if (r == 1 && safe != nullptr) ed.proc.saveDrawer (w->getTextEditorContents ("name"));
+            if (r == 1 && safe != nullptr)
+            {
+                if (rename) ed.proc.renameDrawer (idx, w->getTextEditorContents ("name"));
+                else ed.proc.saveDrawer (w->getTextEditorContents ("name"));
+            }
             delete w;
         }), false);
     }

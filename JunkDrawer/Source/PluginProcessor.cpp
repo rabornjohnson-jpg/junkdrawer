@@ -838,6 +838,39 @@ bool JunkDrawerProcessor::saveDrawer (const juce::String& name)
     return true;
 }
 
+bool JunkDrawerProcessor::renameDrawer (int index, const juce::String& name)
+{
+    if (index < 100 || index >= drawerCount() || name.trim().isEmpty()) return false;
+    auto d = userDrawers[(size_t) (index - 100)];
+    const auto oldFile = jdp::userFolder().getChildFile (jdp::safeName (d.name) + ".drawer");
+    d.name = name.trim();
+    const auto newFile = jdp::userFolder().getChildFile (jdp::safeName (d.name) + ".drawer");
+    if (newFile != oldFile && newFile.existsAsFile()) return false;           // never overwrite another drawer
+    if (! jdp::saveUser (d)) return false;
+    if (newFile != oldFile) oldFile.deleteFile();
+    const bool wasCurrent = drawerIndex == index;
+    reloadUserDrawers();
+    if (wasCurrent)
+        for (size_t i = 0; i < userDrawers.size(); ++i)
+            if (userDrawers[i].name == d.name) drawerIndex = 100 + (int) i;
+    state.state.setProperty ("drawer", drawerIndex, nullptr);
+    sendChangeMessage();
+    return true;
+}
+
+bool JunkDrawerProcessor::deleteDrawer (int index)
+{
+    if (index < 100 || index >= drawerCount()) return false;
+    const auto file = jdp::userFolder().getChildFile (jdp::safeName (userDrawers[(size_t) (index - 100)].name) + ".drawer");
+    if (! file.deleteFile()) return false;
+    reloadUserDrawers();
+    if (drawerIndex == index) drawerIndex = -1;
+    else if (drawerIndex > index) --drawerIndex;
+    state.state.setProperty ("drawer", drawerIndex, nullptr);
+    sendChangeMessage();
+    return true;
+}
+
 void JunkDrawerProcessor::publishMods()
 {
     auto t = std::make_shared<jd::ModTable>();

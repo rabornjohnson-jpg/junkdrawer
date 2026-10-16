@@ -770,6 +770,16 @@ int main()
         check (proc.currentDrawer() == 8, "next steps forward");
         proc.stepDrawer (-1); proc.stepDrawer (-8);
         check (proc.currentDrawer() == proc.drawerCount() - 1, "previous wraps around");
+        {
+            const int before = proc.drawerCount();
+            check (proc.saveDrawer ("Test Drawer ZZ"), "a drawer can be saved");
+            check (proc.drawerCount() == before + 1 && proc.currentDrawer() >= 100, "it appears in the list and becomes the current one");
+            check (proc.drawer (proc.currentDrawer()).name == "Test Drawer ZZ", "it keeps its name");
+            check (! proc.renameDrawer (7, "Nope") && ! proc.deleteDrawer (7), "factory drawers cannot be renamed or deleted");
+            check (proc.renameDrawer (proc.currentDrawer(), "Test Drawer YY") && proc.drawer (proc.currentDrawer()).name == "Test Drawer YY" && proc.drawerCount() == before + 1, "a saved drawer can be renamed");
+            check (proc.deleteDrawer (proc.currentDrawer()) && proc.drawerCount() == before && proc.currentDrawer() == -1, "a saved drawer can be deleted");
+            proc.loadDrawer (7);
+        }
         check (proc.getNumPrograms() == proc.drawerCount() && proc.getProgramName (0).isNotEmpty(), "hosts see the drawers as programs");
     }
 
