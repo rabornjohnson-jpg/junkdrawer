@@ -116,10 +116,10 @@ Step-lane engine, LFO engine, file loading, DAW recording pipeline. Pull these i
 
 ### Stage 8: Polish
 - 100 factory presets ("drawers"), organized by feel. BUILT (generated in code, Presets.h): 10 groups of 10. A drawer keeps every setting except sample files, region counts and region edges. Header bar steps with the arrows and opens a grouped menu; "Save this drawer as..." writes user drawers to the app data folder (Mine). Hosts see them as programs. Rename and delete for saved drawers are in the picker menu. Import and export of .drawer files are in the same menu (imports never overwrite; a clash gets a number). Not done: tuning each factory drawer by ear with real sounds.
-- Installer, About page, quick-start guide.
+- About page and quick start: BUILT (drawer menu, "About and quick start..."). Windows VST3 comes from the GitHub "Windows VST3" workflow on every push to main. Installer deferred.
 - macOS build.
 - Link/group tracks.
-- Animation pass (see below).
+- Animation pass: BUILT, kept small. Playing-step glow and a live dot on each LFO tile (15 Hz, only while shown, off with Reduce motion). More only if it stays cheap.
 - Final performance and CPU/RAM audit.
 
 ---
