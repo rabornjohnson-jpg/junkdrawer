@@ -136,7 +136,7 @@ inline juce::File userFolder()
 }
 inline juce::String safeName (juce::String n) { return juce::File::createLegalFileName (n.trim()).substring (0, 60); }
 
-inline bool saveUser (const Drawer& d)
+inline bool writeFile (const Drawer& d, const juce::File& f)
 {
     juce::XmlElement x ("drawer");
     x.setAttribute ("name", d.name);
@@ -150,8 +150,28 @@ inline bool saveUser (const Drawer& d)
         auto* e = x.createNewChildElement ("m");
         e->setAttribute ("id", m.target); e->setAttribute ("lfo", m.lfo); e->setAttribute ("amount", (double) m.amount);
     }
-    auto f = userFolder().getChildFile (safeName (d.name) + ".drawer");
     return f.getParentDirectory().createDirectory().wasOk() && x.writeTo (f);
+}
+
+// Reads one .drawer file.  Anything that is not a drawer, or is absurdly large, is refused.
+inline bool readFile (const juce::File& f, Drawer& d)
+{
+    if (! f.existsAsFile() || f.getSize() > 2 * 1024 * 1024) return false;
+    auto x = juce::XmlDocument::parse (f);
+    if (x == nullptr || ! x->hasTagName ("drawer")) return false;
+    d = {};
+    d.name = x->getStringAttribute ("name", f.getFileNameWithoutExtension()).trim();
+    if (d.name.isEmpty()) d.name = f.getFileNameWithoutExtension();
+    d.group = "Mine";
+    int count = 0;
+    for (auto* e : x->getChildWithTagNameIterator ("v")) { if (++count > 6000) break; d.values[e->getStringAttribute ("id")] = (float) e->getDoubleAttribute ("x"); }
+    for (auto* e : x->getChildWithTagNameIterator ("m")) { if (++count > 6000) break; d.mods.push_back ({ e->getStringAttribute ("id"), e->getIntAttribute ("lfo"), (float) e->getDoubleAttribute ("amount") }); }
+    return true;
+}
+
+inline bool saveUser (const Drawer& d)
+{
+    return writeFile (d, userFolder().getChildFile (safeName (d.name) + ".drawer"));
 }
 
 inline std::vector<Drawer> loadUser()

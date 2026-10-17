@@ -213,6 +213,8 @@ struct JunkDrawerEditor::Header : juce::Component, juce::Timer, juce::ChangeList
         }
         m.addSeparator();
         m.addItem (100000, "Save this drawer as...");
+        m.addItem (100003, "Export this drawer to a file...", ed.proc.currentDrawer() >= 0);
+        m.addItem (100004, "Import drawers from files...");
         if (ed.proc.currentDrawer() >= 100)
         {
             m.addItem (100001, "Rename this drawer...");
@@ -225,7 +227,39 @@ struct JunkDrawerEditor::Header : juce::Component, juce::Timer, juce::ChangeList
             if (r == 100000) { askName (false); return; }
             if (r == 100001) { askName (true); return; }
             if (r == 100002) { confirmDelete(); return; }
+            if (r == 100003) { exportCurrent(); return; }
+            if (r == 100004) { importFiles(); return; }
             ed.proc.loadDrawer (r - 1);
+        });
+    }
+
+    void exportCurrent()
+    {
+        const int idx = ed.proc.currentDrawer();
+        if (idx < 0) return;
+        const auto start = juce::File::getSpecialLocation (juce::File::userDocumentsDirectory).getChildFile (jdp::safeName (ed.proc.drawer (idx).name) + ".drawer");
+        chooser = std::make_unique<juce::FileChooser> ("Export this drawer", start, "*.drawer");
+        chooser->launchAsync (juce::FileBrowserComponent::saveMode | juce::FileBrowserComponent::canSelectFiles | juce::FileBrowserComponent::warnAboutOverwriting,
+                              [this, safe = juce::Component::SafePointer<Header> (this), idx] (const juce::FileChooser& fc)
+        {
+            if (safe == nullptr || fc.getResult() == juce::File()) return;
+            ed.proc.exportDrawer (idx, fc.getResult());
+        });
+    }
+
+    void importFiles()
+    {
+        chooser = std::make_unique<juce::FileChooser> ("Import drawers", juce::File::getSpecialLocation (juce::File::userDocumentsDirectory), "*.drawer");
+        chooser->launchAsync (juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectFiles | juce::FileBrowserComponent::canSelectMultipleItems,
+                              [this, safe = juce::Component::SafePointer<Header> (this)] (const juce::FileChooser& fc)
+        {
+            if (safe == nullptr) return;
+            const auto files = fc.getResults();
+            if (files.isEmpty()) return;
+            const int n = ed.proc.importDrawers (files);
+            juce::AlertWindow::showAsync (juce::MessageBoxOptions().withIconType (juce::MessageBoxIconType::NoIcon).withTitle ("Import drawers")
+                                              .withMessage (n == 0 ? "Nothing was added. Those files are not Junk Drawer drawers."
+                                                                   : juce::String (n) + (n == 1 ? " drawer was" : " drawers were") + " added under Mine.").withButton ("OK"), nullptr);
         });
     }
 
@@ -291,6 +325,7 @@ struct JunkDrawerEditor::Header : juce::Component, juce::Timer, juce::ChangeList
 
     JunkDrawerEditor& ed;
     std::array<juce::TextButton, NumPages> tabs;
+    std::unique_ptr<juce::FileChooser> chooser;
     juce::TextButton reduce, exportBtn;
     double bpm = 0.0;
 };

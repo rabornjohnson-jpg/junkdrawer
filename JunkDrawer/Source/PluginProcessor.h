@@ -116,6 +116,8 @@ public:
     bool renameDrawer (int index, const juce::String& name);      // saved drawers only
     bool deleteDrawer (int index);                                // saved drawers only
     void reloadUserDrawers();
+    bool exportDrawer (int index, const juce::File& file) const;      // any drawer, factory or saved, to a .drawer file anywhere
+    int  importDrawers (const juce::Array<juce::File>& files);        // copies them into Mine, never over a drawer you already have; returns how many came in
 
     // Offline export support: an export runs a second processor of its own (see Exporter.h).
     void importSettings (const juce::ValueTree& tree) { state.replaceState (tree); loadMods(); loadPatternsFromState(); }

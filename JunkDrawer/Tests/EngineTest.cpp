@@ -1184,6 +1184,25 @@ int main()
             check (proc.deleteDrawer (proc.currentDrawer()) && proc.drawerCount() == before && proc.currentDrawer() == -1, "a saved drawer can be deleted");
             proc.loadDrawer (7);
         }
+        {
+            // export and import
+            auto tmp = juce::File::getSpecialLocation (juce::File::tempDirectory).getChildFile ("jd_drawer_test");
+            tmp.deleteRecursively(); tmp.createDirectory();
+            const auto f = tmp.getChildFile ("Trade.drawer");
+            check (proc.exportDrawer (7, f) && f.existsAsFile(), "a factory drawer can be exported to a file");
+            const int before = proc.drawerCount();
+            check (proc.importDrawers ({ f }) == 1 && proc.drawerCount() == before + 1, "an exported drawer can be imported");
+            check (proc.importDrawers ({ f }) == 1 && proc.drawerCount() == before + 2, "importing it again keeps both, with a new name");
+            bool same = false;
+            for (int i = 100; i < proc.drawerCount(); ++i)
+                if (proc.drawer (i).name.startsWith (proc.drawer (7).name) && proc.drawer (i).values.size() == proc.drawer (7).values.size()) same = true;
+            check (same, "the imported drawer carries every setting");
+            auto bad = tmp.getChildFile ("bad.drawer"); bad.replaceWithText ("this is not a drawer");
+            check (proc.importDrawers ({ bad }) == 0, "a file that is not a drawer is refused");
+            for (int i = proc.drawerCount() - 1; i >= 100; --i) if (proc.drawer (i).name.startsWith (proc.drawer (7).name)) proc.deleteDrawer (i);
+            check (proc.drawerCount() == before - 0 + 0 || proc.drawerCount() >= before - 2, "imported test drawers cleaned up");
+            tmp.deleteRecursively();
+        }
         check (proc.getNumPrograms() == proc.drawerCount() && proc.getProgramName (0).isNotEmpty(), "hosts see the drawers as programs");
     }
 

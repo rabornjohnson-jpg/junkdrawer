@@ -1287,6 +1287,28 @@ bool JunkDrawerProcessor::saveDrawer (const juce::String& name)
     return true;
 }
 
+bool JunkDrawerProcessor::exportDrawer (int index, const juce::File& file) const
+{
+    if (index < 0 || index >= drawerCount()) return false;
+    return jdp::writeFile (drawer (index), file.hasFileExtension ("drawer") ? file : file.withFileExtension ("drawer"));
+}
+
+int JunkDrawerProcessor::importDrawers (const juce::Array<juce::File>& files)
+{
+    int got = 0;
+    for (auto& f : files)
+    {
+        jdp::Drawer d;
+        if (! jdp::readFile (f, d)) continue;
+        const auto base = d.name;
+        for (int k = 2; jdp::userFolder().getChildFile (jdp::safeName (d.name) + ".drawer").existsAsFile() && k < 1000; ++k)
+            d.name = base + " " + juce::String (k);
+        if (jdp::saveUser (d)) ++got;
+    }
+    if (got > 0) { reloadUserDrawers(); sendChangeMessage(); }
+    return got;
+}
+
 bool JunkDrawerProcessor::renameDrawer (int index, const juce::String& name)
 {
     if (index < 100 || index >= drawerCount() || name.trim().isEmpty()) return false;
