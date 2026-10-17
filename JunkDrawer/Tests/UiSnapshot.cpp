@@ -281,7 +281,7 @@ int main (int argc, char** argv)
         shot ("export_done.png");
         auto tmpRoot = juce::File::getSpecialLocation (juce::File::tempDirectory);
         int made = 0;
-        for (auto& d : tmpRoot.findChildFiles (juce::File::findDirectories, false, "Junk Drawer Export *"))
+        for (auto& d : tmpRoot.findChildFiles (juce::File::findDirectories, false, "Rotary Dial Export *"))
         { for (auto& f : d.findChildFiles (juce::File::findFiles, false, "*.wav")) { ++made; std::printf ("export wrote %s (%lld bytes)\n", f.getFileName().toRawUTF8(), (long long) f.getSize()); } d.deleteRecursively(); }
         if (made == 0) { std::printf ("export through the window wrote nothing\n"); ++problems; }
         jdx::ExportSettings none; none.save();
