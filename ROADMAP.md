@@ -76,7 +76,7 @@ Step-lane engine, LFO engine, file loading, DAW recording pipeline. Pull these i
 ### Stage 6: Master page
 - Master volume, pan, pitch (range +/-12, 24 or 48 semitones), **Rate** (0.25x to 4x on a log scale, 1.00x at center; scales step speed only, never pitch; in Sync mode it snaps to 1/4x, 1/2x, 1x, 2x, 4x), swing, width, output meter.
 - Simple fixed-order effects, each a card with On/Bypass and a mode: Filter (low/band/high pass, notch; cutoff, reso, drive, mix, slope), Delay (free/sync/dotted/triplet; time, feedback, tone, mix, mono or ping-pong), Reverb (room/hall/plate/spring; size, decay, damping, mix, pre-delay), Limiter (soft/hard; ceiling, release, input, mix, lookahead). A bypassed effect uses no CPU.
-- Per-track sends to the built-in delay and reverb: BUILT (inside the plug-in only). Two knobs per track in the new Sends card; they run the Master page Delay and Reverb settings wet-only, and go quiet when that effect is off. The brass plate gave way to the card.
+- Per-track sends to the built-in delay and reverb: BUILT (inside the plug-in only). Two knobs per track in the Sends card under the brass nameplate; they run the Master page Delay and Reverb settings wet-only, and go quiet when that effect is off..
 - Master and per-track meters; per-track mute, solo and pan. No separate DAW outputs: Junk Drawer stays one stereo out (decided with Ray).
 
 ### Stage 7: Depth

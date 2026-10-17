@@ -1339,8 +1339,8 @@ struct Junk : juce::Component
         sub.setBounds (rx + 94, 14 + 66, 88, 26);
         snap->setBounds (rx + 16, 14 + 116, 150, 26);
         if (morphKnob != nullptr) morphKnob->setBounds (rx + 54, 14 + 148, 30, 26);
-        if (sendDelKnob != nullptr) sendDelKnob->setBounds (680 + 20, 14 + 44, 76, 76);
-        if (sendRevKnob != nullptr) sendRevKnob->setBounds (680 + 118, 14 + 44, 76, 76);
+        if (sendDelKnob != nullptr) sendDelKnob->setBounds (680 + 10, 124 + 30, 86, 76);
+        if (sendRevKnob != nullptr) sendRevKnob->setBounds (680 + 116, 124 + 30, 86, 76);
         play.setBounds (rx, 14 + 184, 88, 26);
         stop.setBounds (rx + 94, 14 + 184, 88, 26);
     }
@@ -1365,10 +1365,21 @@ struct Junk : juce::Component
         padBehind (g, { &rummage, &shakeBtn, &keep[0], &keep[1], &keep[2], &keep[3], &keep[4], &keep[5], div.get(), feel.get(), &run, snap.get(), &sliceEq, &sliceHit, &add, &sub, &play, &stop });
         drawText (g, "Snap edges to", { 236 + 16, 14 + 96, 182, 18 }, sans (11.f, true), juce::Colour (0xff5a4329));
 
-        card (g, { 680.f, 14.f, 212.f, 222.f }, "SENDS");
-        g.setColour (juce::Colour (0xff5a4329));
-        g.setFont (sans (11.f));
-        g.drawFittedText ("How much of this track goes to the Delay and the Reverb. They use the settings on the Master page, and go quiet when switched off there.", { 680 + 16, 14 + 152, 182, 62 }, juce::Justification::topLeft, 4, 1.f);
+        // the brass nameplate, a little smaller to make room for the sends beneath it
+        const juce::Rectangle<float> plate (680.f, 14.f, 212.f, 100.f);
+        g.setColour (juce::Colour (0x66000000)); g.fillRoundedRectangle (plate.translated (0.f, 4.f), 3.f);
+        g.setGradientFill (juce::ColourGradient (juce::Colour (0xffe6cd84), plate.getX(), plate.getY(), juce::Colour (0xff8a6728), plate.getRight(), plate.getBottom(), false));
+        g.fillRoundedRectangle (plate, 3.f);
+        g.setColour (juce::Colour (0xff4a3413)); g.drawRoundedRectangle (plate.reduced (0.5f), 3.f, 1.f);
+        g.setColour (juce::Colour (0x59ffe9a8)); g.drawRoundedRectangle (plate.reduced (3.f), 2.f, 1.f);
+        const auto ink2 = juce::Colour (0xff3a2606);
+        g.setOpacity (0.85f);
+        drawLogo (g, { 680 + 64, 20, 84, 34 });
+        drawText (g, "FADING FRACTAL AUDIO", { 680 + 8, 56, 196, 13 }, sans (10.f, true).withExtraKerningFactor (0.1f), ink2, juce::Justification::centred);
+        drawText (g, "Junk Drawer", { 680 + 8, 67, 196, 28 }, serif (23.f), ink2, juce::Justification::centred);
+        g.setOpacity (1.f);
+
+        card (g, { 680.f, 124.f, 212.f, 112.f }, "SENDS");
     }
 
     Proc& proc;
