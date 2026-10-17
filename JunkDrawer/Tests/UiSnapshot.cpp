@@ -79,10 +79,10 @@ static void paintAll (JunkDrawerEditor& root, juce::Component& c)
     for (auto* ch : c.getChildren()) paintAll (root, *ch);
 }
 
-static int auditPage (JunkDrawerEditor& e, const juce::String& name)
+static int auditPage (JunkDrawerEditor& e, const juce::String& name, juce::Component* only = nullptr)
 {
     std::vector<ui::TextAudit> v;
-    ui::auditSink() = &v; paintAll (e, e); ui::auditSink() = nullptr;
+    ui::auditSink() = &v; paintAll (e, only != nullptr ? *only : static_cast<juce::Component&> (e)); ui::auditSink() = nullptr;
     ui::auditHideText() = true; auto bgImg = snap (e); ui::auditHideText() = false;
     { juce::PNGImageFormat png; juce::File f (juce::File::getCurrentWorkingDirectory().getChildFile ("audit_bg_" + name + ".png")); f.deleteFile(); juce::FileOutputStream fs (f); png.writeImageToStream (bgImg, fs); }
     int bad = 0;
@@ -130,6 +130,8 @@ int main (int argc, char** argv)
     if (juce::SystemStats::getEnvironmentVariable ("JD_HC", "0") == "1") editor->setHighContrast (true);
     const char* names[] = { "drawer", "lfos", "master", "matrix", "song" };
     int problems = 0;
+    const bool auditOn = juce::SystemStats::getEnvironmentVariable ("JD_AUDIT", "0") == "1";
+    auto audit = [&] (const juce::String& n, juce::Component* only = nullptr) { if (auditOn) auditPage (*editor, n, only); };
 
     // empty drawer first, then one with a generated sample in track 1 (a few decaying hits)
     {
@@ -142,6 +144,7 @@ int main (int argc, char** argv)
         juce::FileOutputStream fs (f);
         png.writeImageToStream (img, fs);
         problems += checkLayout (*editor, "drawer-empty");
+        audit ("drawer-empty");
     }
     {
         auto wav = out.getChildFile ("test_hits.wav");
@@ -228,6 +231,7 @@ int main (int argc, char** argv)
             juce::FileOutputStream fs (f);
             png.writeImageToStream (img, fs);
             problems += checkLayout (*editor, nm);
+            audit (juce::String ("lane-") + nm);
         }
     }
     // the recording panel, set up and ready (opened with the Record button, as a person would)
@@ -257,6 +261,7 @@ int main (int argc, char** argv)
         juce::FileOutputStream fs (f);
         png.writeImageToStream (img, fs);
         problems += checkLayout (*editor, "record-ready");
+        audit ("record-ready");
     }
     // a take in progress: the recording panel replaces the waveform sheet
     {
@@ -282,6 +287,7 @@ int main (int argc, char** argv)
         juce::FileOutputStream fs (f);
         png.writeImageToStream (img, fs);
         problems += checkLayout (*editor, "record");
+        audit ("record");
         proc.stopCatch (false);
         proc.processBlock (rb, midi);
         for (int i = 0; i < 6; ++i) juce::MessageManager::getInstance()->runDispatchLoopUntil (60);
@@ -297,6 +303,10 @@ int main (int argc, char** argv)
             f.deleteFile();
             juce::FileOutputStream fs (f);
             png.writeImageToStream (img, fs);
+            juce::Component* only = juce::String (name) == "about.png" ? &editor->aboutWindow() : &editor->exportWindow();
+            if (juce::String (name) == "export_first.png")        // the folder prompt sits on top of the options card: audit the prompt alone
+                for (int k = only->getNumChildComponents() - 1; k >= 0; --k) if (only->getChildComponent (k)->isVisible()) { only = only->getChildComponent (k); break; }
+            audit (name, only);
         };
         jdx::ExportSettings st; st.mode = 2; st.folder = juce::File ("/home/ray/Music/Junk Drawer exports"); st.save();
         editor->showPage (0);

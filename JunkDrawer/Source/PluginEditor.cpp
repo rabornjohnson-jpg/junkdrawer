@@ -189,8 +189,26 @@ struct JunkDrawerEditor::Header : juce::Component, juce::Timer, juce::ChangeList
             juce::MessageManager::callAsync ([safe = juce::Component::SafePointer<JunkDrawerEditor> (&ed), v] { if (safe != nullptr) safe->setHighContrast (v); });
         };
         addAndMakeVisible (hiCon);
+        stationBar = std::make_unique<ui::FocusProxy> ("Station", "Left and Right change station. Enter opens the list of stations.");
+        stationBar->role = juce::AccessibilityRole::comboBox;
+        stationBar->radius = 9.f;
+        stationBar->valueText = [this]
+        {
+            const int cur = ed.proc.currentDrawer();
+            return cur < 0 ? juce::String ("No station picked") : "Station " + juce::String (cur + 1) + ", " + ed.proc.drawer (cur).name;
+        };
+        stationBar->onKey = [this] (const juce::KeyPress& k)
+        {
+            if (k == juce::KeyPress::leftKey)  { ed.proc.stepDrawer (-1); return true; }
+            if (k == juce::KeyPress::rightKey) { ed.proc.stepDrawer (1);  return true; }
+            return false;
+        };
+        stationBar->onPress = [this] { openMenu(); };
+        addAndMakeVisible (*stationBar);
+        for (auto* b : { &reduce, &exportBtn, &hiCon }) b->setWantsKeyboardFocus (true);
         reduce.setClickingTogglesState (true);
         reduce.setToggleState ((bool) ed.proc.state.state.getProperty ("reduceMotion", false), juce::dontSendNotification);
+        reduce.setTitle ("Reduce motion"); hiCon.setTitle ("High contrast"); exportBtn.setTitle ("Export");
         reduce.setTooltip ("Turns off the fading glow on the playing step");
         reduce.onClick = [this] { ed.proc.state.state.setProperty ("reduceMotion", reduce.getToggleState(), nullptr); };
         addAndMakeVisible (reduce);
@@ -202,7 +220,7 @@ struct JunkDrawerEditor::Header : juce::Component, juce::Timer, juce::ChangeList
     }
 
     ~Header() override { ed.proc.removeChangeListener (this); }
-    void changeListenerCallback (juce::ChangeBroadcaster*) override { repaint(); }
+    void changeListenerCallback (juce::ChangeBroadcaster*) override { repaint(); if (stationBar != nullptr) stationBar->invalidateAccessibilityHandler(); }
     void select (int i) { tabs[(size_t) i].setToggleState (true, juce::dontSendNotification); }
 
     void resized() override
@@ -211,6 +229,7 @@ struct JunkDrawerEditor::Header : juce::Component, juce::Timer, juce::ChangeList
         for (auto& b : tabs) { b.setBounds (x, 16, 60, 28); x += 64; }
         reduce.setBounds (getWidth() - 44 - 150, 6, 150, 21);
         hiCon.setBounds (getWidth() - 44 - 150, 28, 150, 21);
+        stationBar->setBounds (barArea().expanded (3));
         exportBtn.setBounds (896, 16, 64, 28);
     }
 
@@ -371,6 +390,7 @@ struct JunkDrawerEditor::Header : juce::Component, juce::Timer, juce::ChangeList
     std::array<juce::TextButton, NumPages> tabs;
     std::unique_ptr<juce::FileChooser> chooser;
     juce::TextButton reduce, exportBtn, hiCon;
+    std::unique_ptr<ui::FocusProxy> stationBar;
     double bpm = 0.0;
 };
 
@@ -401,6 +421,31 @@ struct WaveView : juce::Component, juce::SettableTooltipClient
     explicit WaveView (Proc& p) : proc (p)
     {
         setTooltip ("Drag a region edge to move it. Click inside a region to pick it and hear it.");
+        keys = std::make_unique<FocusProxy> ("Regions", "Left and Right choose a region. Space plays it.");
+        keys->role = juce::AccessibilityRole::comboBox;
+        keys->radius = 10.f;
+        keys->valueText = [this]
+        {
+            const int n = regionCount();
+            if (proc.getTrack (track) == nullptr || n == 0) return juce::String ("No sound loaded");
+            const int r = juce::jlimit (0, n - 1, selected);
+            return "Region " + juce::String (r + 1) + " of " + juce::String (n) + ", " + regionPartName (r);
+        };
+        keys->onKey = [this] (const juce::KeyPress& k)
+        {
+            const int n = regionCount();
+            if (proc.getTrack (track) == nullptr || n == 0) return false;
+            int d = 0;
+            if (k == juce::KeyPress::leftKey) d = -1; else if (k == juce::KeyPress::rightKey) d = 1;
+            if (d == 0) return false;
+            selected = juce::jlimit (0, n - 1, selected + d);
+            if (onPick) onPick (selected);
+            proc.auditionRegion (track, selected);
+            repaint();
+            return true;
+        };
+        keys->onPress = [this] { if (proc.getTrack (track) != nullptr) proc.auditionRegion (track, juce::jlimit (0, juce::jmax (0, regionCount() - 1), selected)); };
+        addAndMakeVisible (*keys);
     }
 
     void setTrack (int t, int sel) { track = t; selected = sel; peaksFor = nullptr; repaint(); }
@@ -410,7 +455,7 @@ struct WaveView : juce::Component, juce::SettableTooltipClient
 
     std::function<void (int)> onPick;
 
-    void resized() override { peaksFor = nullptr; }
+    void resized() override { peaksFor = nullptr; keys->setBounds (getLocalBounds()); }
 
     void paint (juce::Graphics& g) override
     {
@@ -575,6 +620,7 @@ private:
     }
 
     Proc& proc;
+    std::unique_ptr<FocusProxy> keys;
     int track = 0, selected = 0, dragRegion = -1;
     bool dragEnd = false;
     const jd::TrackData* peaksFor = nullptr;
@@ -674,6 +720,66 @@ struct StepGrid : juce::Component, juce::Timer, juce::SettableTooltipClient
     explicit StepGrid (Proc& p) : proc (p)
     {
         setTooltip ("Click a step to change it, drag across steps to paint, double-click to reset, right-click to clear a region step. The volume bars underneath can be dragged too.");
+        keys = std::make_unique<FocusProxy> ("Steps", "Left and Right move between steps. Up and Down change the value. Delete puts the step back to plain.");
+        keys->role = juce::AccessibilityRole::comboBox;
+        keys->radius = 7.f;
+        keys->valueText = [this] { return stepText (cursor); };
+        keys->onKey = [this] (const juce::KeyPress& k)
+        {
+            const int len = proc.laneLength (track, lane);
+            if (k == juce::KeyPress::leftKey)  { cursor = juce::jlimit (0, len - 1, cursor - 1); repaint(); keys->invalidateAccessibilityHandler(); return true; }
+            if (k == juce::KeyPress::rightKey) { cursor = juce::jlimit (0, len - 1, cursor + 1); repaint(); keys->invalidateAccessibilityHandler(); return true; }
+            if (k == juce::KeyPress::homeKey)  { cursor = 0; repaint(); return true; }
+            if (k == juce::KeyPress::endKey)   { cursor = len - 1; repaint(); return true; }
+            if (k == juce::KeyPress::upKey)    { nudge (cursor, 1); return true; }
+            if (k == juce::KeyPress::downKey)  { nudge (cursor, -1); return true; }
+            if (k == juce::KeyPress::deleteKey || k == juce::KeyPress::backspaceKey) { setStep (cursor, defaultFor (lane)); return true; }
+            return false;
+        };
+        addAndMakeVisible (*keys);
+    }
+
+    int cursor = 0;
+    std::unique_ptr<FocusProxy> keys;
+
+    void resized() override { keys->setBounds (labelW, 0, stripW, stripH); }
+
+    // What one step holds, in words, for the screen reader.
+    juce::String stepText (int i) const
+    {
+        static const char* names[] = { "Region", "Volume", "Pitch", "Ratchet", "Direction", "Length", "Chance", "Timing", "Pan" };
+        const int len = proc.laneLength (track, lane);
+        i = juce::jlimit (0, juce::jmax (0, len - 1), i);
+        const float v = plainValue (proc, jd::stepId (track, i, lane));
+        juce::String val;
+        switch (lane)
+        {
+            case jd::LaneRegion:    val = juce::roundToInt (v) > 0 ? juce::String (regionPartName (juce::roundToInt (v) - 1)) : juce::String ("none"); break;
+            case jd::LaneDirection: val = juce::roundToInt (v) == 0 ? "region default" : (juce::roundToInt (v) == 1 ? "forward" : "reverse"); break;
+            case jd::LanePitch:     val = juce::String (juce::roundToInt (v)) + " semitones"; break;
+            case jd::LaneRatchet:   val = juce::String (juce::roundToInt (v)) + " hits"; break;
+            default:                val = juce::String (juce::roundToInt (v * 100.f)) + " percent"; break;
+        }
+        return "Step " + juce::String (i + 1) + " of " + juce::String (len) + ", " + names[juce::jlimit (0, 8, lane)] + ": " + val;
+    }
+
+    void nudge (int i, int dir)
+    {
+        if (i < 0 || i >= proc.laneLength (track, lane)) return;
+        const float cur = plainValue (proc, jd::stepId (track, i, lane));
+        const int regionsHere = juce::roundToInt (plainValue (proc, jd::trackId (track, "regions")));
+        switch (lane)
+        {
+            case jd::LaneRegion:    setStep (i, (float) juce::jlimit (0, regionsHere, juce::roundToInt (cur) + dir)); break;
+            case jd::LaneDirection: setStep (i, (float) juce::jlimit (0, 2, juce::roundToInt (cur) + dir)); break;
+            case jd::LanePitch:     setStep (i, (float) juce::jlimit (-12, 12, juce::roundToInt (cur) + dir)); break;
+            case jd::LaneRatchet:   setStep (i, (float) juce::jlimit (1, 4, juce::roundToInt (cur) + dir)); break;
+            case jd::LaneLength:    setStep (i, juce::jlimit (0.1f, 1.f, cur + 0.05f * (float) dir)); break;
+            case jd::LanePan:       setStep (i, juce::jlimit (-1.f, 1.f, std::round ((cur + 0.05f * (float) dir) * 20.f) / 20.f)); break;
+            case jd::LaneTime:      setStep (i, juce::jlimit (-0.5f, 0.5f, std::round ((cur + 0.05f * (float) dir) * 20.f) / 20.f)); break;
+            default:                setStep (i, juce::jlimit (0.f, 1.f, cur + 0.05f * (float) dir)); break;
+        }
+        keys->invalidateAccessibilityHandler();
     }
 
     static constexpr int labelW = 64, stripW = 592, stripH = 70, overviewY = 80, overviewH = 62;
@@ -751,6 +857,9 @@ struct StepGrid : juce::Component, juce::Timer, juce::SettableTooltipClient
             if (glow[(size_t) i] > 0.f) { g.setColour (pal::amber.withAlpha (0.22f * glow[(size_t) i])); g.fillRoundedRectangle (c, 3.f); }
             if (i == cur) { g.setColour (pal::amber); g.drawRoundedRectangle (c.reduced (0.5f), 3.f, 2.f); }
         }
+
+        if (keys != nullptr && keys->hasKeyboardFocus (false) && cursor < len)
+            paintFocus (g, juce::Rectangle<float> (cellX (cursor), 3.f, cellW(), (float) stripH - 6.f).expanded (1.f), 4.f);
 
         // overview of the volume lane
         const int vlen = proc.laneLength (track, jd::LaneVolume), vcur = currentIndex (jd::LaneVolume);
@@ -989,7 +1098,7 @@ struct RecPanel : juce::Component, juce::Timer
     void paint (juce::Graphics& g) override
     {
         update();
-        const auto ink = juce::Colour (0xff2a1b10), red = juce::Colour (0xffb5532f), sub = juce::Colour (0xff5a4329);
+        const auto ink = juce::Colour (0xff2a1b10), red = juce::Colour (0xffa63f1d), sub = juce::Colour (0xff5a4329);
         const auto r = getLocalBounds().toFloat();
         g.setColour (highContrast() ? juce::Colours::white : juce::Colour (0xfff1e7c9)); g.fillRoundedRectangle (r, 3.f);
         g.setColour (juce::Colour (0x4d5a3c1e)); g.drawRoundedRectangle (r.reduced (0.5f), 3.f, 1.f);
@@ -1362,10 +1471,13 @@ struct Liner : juce::Component, juce::FileDragAndDropTarget
             const float tune = plainValue (proc, jd::trackId (track, "tune"));
             drawText (g, "Tune", { 392, 31, 72, 12 }, sans (11.f, true), ink.withAlpha (0.85f));
             drawText (g, (tune > 0.05f ? "+" : "") + juce::String (tune, 1) + " st", { 392, 42, 72, 12 }, mono (11.f), ink);
+            if (! recOpen)
+            {
             drawText (g, "Steps", { 512, 228, 38, 24 }, sans (11.f, true), ink.withAlpha (0.85f), juce::Justification::centredRight);
             drawText (g, juce::String (proc.laneLength (track, grid.laneIndex())), { 578, 228, 30, 24 }, mono (13.f, true), ink, juce::Justification::centred);
             const int feel = juce::jlimit (0, 2, juce::roundToInt (plainValue (proc, "seq_feel")));
             drawText (g, jd::kStepDivs[juce::jlimit (0, 3, juce::roundToInt (plainValue (proc, "seq_div")))] + (feel == 1 ? "d" : feel == 2 ? "t" : ""), { 636, 228, 36, 24 }, mono (11.f), ink.withAlpha (0.8f), juce::Justification::centredRight);
+            }
         }
         if (message.isNotEmpty())
             drawText (g, message, { 16, td == nullptr ? 350 : 409, 656, 16 }, sans (12.f), juce::Colour (0xff7a2e16), td == nullptr ? juce::Justification::centred : juce::Justification::centredLeft);
@@ -1413,10 +1525,40 @@ struct TuneDial : juce::Component, juce::SettableTooltipClient, juce::ChangeList
     {
         setTooltip ("Tuning dial. Drag it, or scroll over it, to move between stations.");
         setMouseCursor (juce::MouseCursor::UpDownResizeCursor);
+        setTitle ("Station dial");
+        setDescription ("Moves between the 100 factory stations and the ones you saved. Up and Right go forward, Down and Left go back, Page Up and Page Down jump ten.");
+        setWantsKeyboardFocus (true);
         proc.addChangeListener (this);
     }
+    void focusGained (FocusChangeType) override { repaint(); }
+    void focusLost (FocusChangeType) override { repaint(); }
+    bool keyPressed (const juce::KeyPress& k) override
+    {
+        const int n = proc.drawerCount();
+        auto go = [&] (int to) { proc.loadDrawer (juce::jlimit (0, n - 1, to)); };
+        const int cur = proc.currentDrawer();
+        if (k == juce::KeyPress::upKey || k == juce::KeyPress::rightKey)     { proc.stepDrawer (1);  return true; }
+        if (k == juce::KeyPress::downKey || k == juce::KeyPress::leftKey)    { proc.stepDrawer (-1); return true; }
+        if (k == juce::KeyPress::pageUpKey)   { go (juce::jmax (0, cur) + 10); return true; }
+        if (k == juce::KeyPress::pageDownKey) { go (juce::jmax (0, cur) - 10); return true; }
+        if (k == juce::KeyPress::homeKey) { go (0); return true; }
+        if (k == juce::KeyPress::endKey)  { go (99); return true; }
+        return false;
+    }
+    std::unique_ptr<juce::AccessibilityHandler> createAccessibilityHandler() override
+    {
+        juce::AccessibilityHandler::Interfaces ifs;
+        auto v = std::make_unique<ui::TextValue>();
+        v->get = [this]
+        {
+            const int cur = proc.currentDrawer();
+            return cur < 0 ? juce::String ("No station picked") : "Station " + juce::String (cur + 1) + ", " + proc.drawer (cur).name;
+        };
+        ifs.value = std::move (v);
+        return std::make_unique<juce::AccessibilityHandler> (*this, juce::AccessibilityRole::comboBox, juce::AccessibilityActions(), std::move (ifs));
+    }
     ~TuneDial() override { proc.removeChangeListener (this); }
-    void changeListenerCallback (juce::ChangeBroadcaster*) override { repaint(); }
+    void changeListenerCallback (juce::ChangeBroadcaster*) override { repaint(); invalidateAccessibilityHandler(); }
 
     void mouseDown (const juce::MouseEvent&) override { startIdx = juce::jmax (0, proc.currentDrawer()); lastIdx = proc.currentDrawer(); }
     void mouseDrag (const juce::MouseEvent& e) override
@@ -1479,6 +1621,7 @@ struct TuneDial : juce::Component, juce::SettableTooltipClient, juce::ChangeList
         g.drawImage (logoImage(), juce::Rectangle<float> (c.x - cr * 0.62f, c.y - cr * 0.62f, cr * 1.24f, cr * 0.62f), juce::RectanglePlacement::centred);
         g.setOpacity (1.f);
         drawText (g, "Rotary Dial", juce::Rectangle<int> ((int) (cr * 2.f), 14).withCentre ((c + juce::Point<float> (0.f, cr * 0.42f)).toInt()), serif (11.f), juce::Colour (0xfff6e8c9), juce::Justification::centred);
+        if (hasKeyboardFocus (false)) paintFocus (g, b.reduced (1.f), 0.f, true);
     }
 
     Proc& proc;
@@ -1641,7 +1784,17 @@ struct JunkDrawerEditor::DrawerPage : juce::Component, juce::ChangeListener
     {
         LfoTile (JunkDrawerProcessor& p, int i) : index (i), proc (p), state (p.state), wShape (p.state, jd::lfoId (i, "shape"), *this), wRate (p.state, jd::lfoId (i, "rate"), *this),
                                     wDiv (p.state, jd::lfoId (i, "div"), *this), wSync (p.state, jd::lfoId (i, "sync"), *this)
-        { setTooltip ("LFO " + juce::String (i + 1) + ". Click to start assigning it: then drag any knob up or down to set how much this LFO moves it. Click again to stop."); }
+        {
+            setTooltip ("LFO " + juce::String (i + 1) + ". Click to start assigning it: then drag any knob up or down to set how much this LFO moves it. Click again to stop.");
+            press = std::make_unique<ui::FocusProxy> ("LFO " + juce::String (i + 1), "Press Enter to start assigning this LFO. Then use any knob to set how much this LFO moves it. Press again to stop.");
+            press->role = juce::AccessibilityRole::toggleButton;
+            press->radius = 4.f;
+            press->valueText = [this] { return proc.armedLfo() == index ? juce::String ("assigning") : juce::String ("off"); };
+            press->onPress = [this] { proc.setArmedLfo (proc.armedLfo() == index ? -1 : index); press->invalidateAccessibilityHandler(); };
+            addAndMakeVisible (*press);
+        }
+        void resized() override { press->setBounds (getLocalBounds()); }
+        std::unique_ptr<ui::FocusProxy> press;
         void mouseDown (const juce::MouseEvent&) override { proc.setArmedLfo (proc.armedLfo() == index ? -1 : index); }
 
         // A small dot at the right edge rides this LFO's live value.  Cheap: 15 Hz, only while shown, off with Reduce motion.
@@ -1712,6 +1865,32 @@ struct JunkDrawerEditor::DrawerPage : juce::Component, juce::ChangeListener
             am = std::make_unique<juce::ButtonParameterAttachment> (*s.getParameter (jd::trackId (t, "mute")), m, nullptr);
             as = std::make_unique<juce::ButtonParameterAttachment> (*s.getParameter (jd::trackId (t, "solo")), s_, nullptr);
             wLevel = std::make_unique<Watch> (s, jd::trackId (t, "level"), *this);
+            m.setTitle ("Mute track " + juce::String (t + 1)); s_.setTitle ("Solo track " + juce::String (t + 1));
+            pick = std::make_unique<ui::FocusProxy> ("Track " + juce::String (t + 1), "Press Enter to open this track.");
+            pick->radius = 3.f;
+            pick->valueText = [this]
+            {
+                auto td = proc.getTrack (track);
+                return juce::String (td != nullptr ? td->name : "empty") + (picked ? ", open" : "");
+            };
+            pick->onPress = [this] { if (onPick) onPick (track); };
+            addAndMakeVisible (*pick);
+            fader = std::make_unique<ui::FocusProxy> ("Level, track " + juce::String (t + 1), "Up and Down change the level.");
+            fader->role = juce::AccessibilityRole::comboBox;
+            fader->radius = 3.f;
+            fader->valueText = [this] { return juce::String (juce::roundToInt (proc.state.getParameter (jd::trackId (track, "level"))->getValue() * 100.f)) + " percent"; };
+            fader->onKey = [this] (const juce::KeyPress& k)
+            {
+                float d = 0.f;
+                if (k == juce::KeyPress::upKey || k == juce::KeyPress::rightKey) d = 0.05f;
+                else if (k == juce::KeyPress::downKey || k == juce::KeyPress::leftKey) d = -0.05f;
+                if (d == 0.f) return false;
+                auto* p = proc.state.getParameter (jd::trackId (track, "level"));
+                p->beginChangeGesture(); p->setValueNotifyingHost (juce::jlimit (0.f, 1.f, p->getValue() + d)); p->endChangeGesture();
+                fader->invalidateAccessibilityHandler(); repaint();
+                return true;
+            };
+            addAndMakeVisible (*fader);
         }
         void visibilityChanged() override { if (isShowing()) startTimerHz (4); else stopTimer(); }
         void timerCallback() override
@@ -1723,6 +1902,7 @@ struct JunkDrawerEditor::DrawerPage : juce::Component, juce::ChangeListener
         }
         juce::int64 dotsSig = 0;
         std::unique_ptr<Watch> wLevel;
+        std::unique_ptr<ui::FocusProxy> pick, fader;
         juce::Rectangle<int> faderArea() const { return { 244, 8, 22, 64 }; }
         void setLevelFromY (int y)
         {
@@ -1730,7 +1910,7 @@ struct JunkDrawerEditor::DrawerPage : juce::Component, juce::ChangeListener
             p->setValueNotifyingHost (1.f - juce::jlimit (0.f, 1.f, (float) (y - 12) / 56.f));
             repaint();
         }
-        void resized() override { m.setBounds (200, 10, 22, 26); s_.setBounds (224, 10, 22, 26); }
+        void resized() override { m.setBounds (200, 10, 22, 26); s_.setBounds (224, 10, 22, 26); pick->setBounds (getLocalBounds()); fader->setBounds (246, 8, 20, 64); }
         void mouseDown (const juce::MouseEvent& e) override
         {
             if (onPick) onPick (track);
@@ -2606,7 +2786,7 @@ struct AboutPanel : juce::Component
         for (int i = 0; i < 6; ++i)
         {
             const int y = c.getY() + 94 + i * 62;
-            drawText (g, heads[i], { c.getX() + 28, y, 584, 16 }, sans (11.f, true).withExtraKerningFactor (0.14f), pal::amber.darker (0.3f));
+            drawText (g, heads[i], { c.getX() + 28, y, 584, 16 }, sans (11.f, true).withExtraKerningFactor (0.14f), juce::Colour (0xff5a4329));
             drawText (g, body[i], { c.getX() + 28, y + 20, 584, 34 }, sans (13.f), ink, juce::Justification::topLeft);
         }
     }

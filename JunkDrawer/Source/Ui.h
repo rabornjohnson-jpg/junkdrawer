@@ -36,6 +36,69 @@ const TC brassHi      { 0xffc9a24e, 0xffffffff }, brassDeep { 0xff5a431c, 0xffc8
 const TC bakelite     { 0xff5b2a22, 0xff3a3a3a }, bakeliteDark { 0xff321612, 0xff000000 };
 }
 
+// Keyboard focus ring: a dark ring under a bright one, so it shows on any background.  Thicker in high contrast.
+inline void paintFocus (juce::Graphics& g, juce::Rectangle<float> r, float radius, bool round = false)
+{
+    const float w = highContrast() ? 3.f : 2.f;
+    auto draw = [&] (juce::Rectangle<float> rr, float th, juce::Colour c)
+    {
+        g.setColour (c);
+        if (round) g.drawEllipse (rr, th); else g.drawRoundedRectangle (rr, radius, th);
+    };
+    draw (r.reduced (w * 0.5f), w + 2.f, juce::Colours::black);
+    draw (r.reduced (w * 0.5f), w, highContrast() ? juce::Colour (0xffffd60a) : juce::Colour (0xfff3e1b0));
+}
+
+// A text value for screen readers (current station, selected segment, and so on).
+struct TextValue : juce::AccessibilityTextValueInterface
+{
+    std::function<juce::String()> get;
+    std::function<void (const juce::String&)> set;
+    bool isReadOnly() const override { return ! set; }
+    juce::String getCurrentValueAsString() const override { return get != nullptr ? get() : juce::String(); }
+    void setValueAsString (const juce::String& s) override { if (set != nullptr) set (s); }
+};
+
+// A transparent stand-in for a custom-drawn control: it takes keyboard focus, shows the focus ring, handles keys,
+// and tells screen readers what the control is, what it holds and what pressing it does.  Mouse clicks pass through.
+struct FocusProxy : juce::Component
+{
+    FocusProxy (juce::String name, juce::String help)
+    {
+        setTitle (name); setDescription (help);
+        setWantsKeyboardFocus (true);
+        setInterceptsMouseClicks (false, false);
+    }
+    juce::AccessibilityRole role = juce::AccessibilityRole::button;
+    std::function<juce::String()> valueText;                         // what a screen reader reads as the value
+    std::function<bool (const juce::KeyPress&)> onKey;               // arrow keys and so on; return true when used
+    std::function<void()> onPress;                                   // Enter or Space
+    float radius = 5.f;
+
+    void paint (juce::Graphics& g) override { if (hasKeyboardFocus (false)) paintFocus (g, getLocalBounds().toFloat().reduced (1.f), radius); }
+    void focusGained (FocusChangeType) override { repaint(); }
+    void focusLost (FocusChangeType) override { repaint(); }
+    bool keyPressed (const juce::KeyPress& k) override
+    {
+        if (onKey != nullptr && onKey (k)) return true;
+        if (onPress != nullptr && (k == juce::KeyPress::returnKey || k == juce::KeyPress::spaceKey)) { onPress(); return true; }
+        return false;
+    }
+    std::unique_ptr<juce::AccessibilityHandler> createAccessibilityHandler() override
+    {
+        juce::AccessibilityActions actions;
+        if (onPress != nullptr) actions.addAction (juce::AccessibilityActionType::press, [this] { onPress(); });
+        juce::AccessibilityHandler::Interfaces ifs;
+        if (valueText != nullptr)
+        {
+            auto v = std::make_unique<TextValue>();
+            v->get = valueText;
+            ifs.value = std::move (v);
+        }
+        return std::make_unique<juce::AccessibilityHandler> (*this, role, std::move (actions), std::move (ifs));
+    }
+};
+
 // Embedded typefaces: IBM Plex Sans, IBM Plex Mono, Fraunces and Special Elite (all SIL Open Font License).
 inline juce::Typeface::Ptr face (const char* data, int size)
 {
@@ -154,18 +217,20 @@ struct LookAndFeel : juce::LookAndFeel_V4
         g.setColour (highContrast() ? (s.isEnabled() ? pal::amber.get() : pal::amber.withAlpha (0.4f)) : (s.isEnabled() ? juce::Colour (0xfff3e1b0) : juce::Colour (0x66f3e1b0)));
         g.fillPath (tick, juce::AffineTransform::rotation (ang).translated (c));
 
-        if (s.hasKeyboardFocus (false))
-        {
-            g.setColour (pal::amber);
-            g.drawEllipse (b.expanded (2.f), 1.5f);
-        }
+        if (s.hasKeyboardFocus (false)) paintFocus (g, b.expanded (4.f), 0.f, true);
     }
 
     juce::Font getTextButtonFont (juce::TextButton&, int) override { return sans (12.f, true); }
 
     static bool onMint (const juce::Component& c) { return (bool) c.getProperties().getWithDefault ("mint", false); }
 
-    void drawButtonBackground (juce::Graphics& g, juce::Button& b, const juce::Colour&, bool over, bool down) override
+    void drawButtonBackground (juce::Graphics& g, juce::Button& b, const juce::Colour& c, bool over, bool down) override
+    {
+        paintButtonBody (g, b, c, over, down);
+        if (b.hasKeyboardFocus (false)) paintFocus (g, b.getLocalBounds().toFloat().reduced (1.f), 5.f);
+    }
+
+    void paintButtonBody (juce::Graphics& g, juce::Button& b, const juce::Colour&, bool over, bool down)
     {
         auto r = b.getLocalBounds().toFloat().reduced (0.5f);
         const bool on = b.getToggleState();
@@ -339,7 +404,31 @@ public:
           attach (param, [this] (float v) { idx = invert ? (v > 0.5f ? 0 : 1) : juce::roundToInt (v); repaint(); }, nullptr)
     {
         setTitle (param.getName (64));
+        setWantsKeyboardFocus (true);
         attach.sendInitialUpdate();
+    }
+
+    void focusGained (FocusChangeType) override { repaint(); }
+    void focusLost (FocusChangeType) override { repaint(); }
+    void choose (int i)
+    {
+        i = juce::jlimit (0, labels.size() - 1, i);
+        attach.setValueAsCompleteGesture (invert ? (i == 0 ? 1.f : 0.f) : (float) i);
+    }
+    bool keyPressed (const juce::KeyPress& k) override
+    {
+        if (k == juce::KeyPress::leftKey || k == juce::KeyPress::upKey)    { choose (idx - 1); return true; }
+        if (k == juce::KeyPress::rightKey || k == juce::KeyPress::downKey) { choose (idx + 1); return true; }
+        return false;
+    }
+    std::unique_ptr<juce::AccessibilityHandler> createAccessibilityHandler() override
+    {
+        juce::AccessibilityHandler::Interfaces ifs;
+        auto v = std::make_unique<TextValue>();
+        v->get = [this] { return labels[juce::jlimit (0, labels.size() - 1, idx)]; };
+        v->set = [this] (const juce::String& s) { const int i = labels.indexOf (s); if (i >= 0) choose (i); };
+        ifs.value = std::move (v);
+        return std::make_unique<juce::AccessibilityHandler> (*this, juce::AccessibilityRole::comboBox, juce::AccessibilityActions(), std::move (ifs));
     }
 
     void paint (juce::Graphics& g) override
@@ -355,6 +444,7 @@ public:
             if (on) { g.setColour (pal::amber); g.fillRoundedRectangle (cell.toFloat().reduced (1.f), 3.f); }
             drawText (g, labels[i], cell.reduced (2, 0), sans (11.f, true), on ? pal::amberInk : pal::textSoft, juce::Justification::centred);
         }
+        if (hasKeyboardFocus (false)) paintFocus (g, r.reduced (1.f), 4.f);
     }
 
     // width that fits every label with room to breathe
@@ -384,7 +474,29 @@ private:
 class PickSeg : public juce::Component, public juce::SettableTooltipClient
 {
 public:
-    explicit PickSeg (juce::StringArray items, int initial = 0) : labels (std::move (items)), idx (initial) {}
+    explicit PickSeg (juce::StringArray items, int initial = 0) : labels (std::move (items)), idx (initial) { setWantsKeyboardFocus (true); }
+    void focusGained (FocusChangeType) override { repaint(); }
+    void focusLost (FocusChangeType) override { repaint(); }
+    bool keyPressed (const juce::KeyPress& k) override
+    {
+        if (! isEnabled()) return false;
+        int d = 0;
+        if (k == juce::KeyPress::leftKey || k == juce::KeyPress::upKey) d = -1;
+        else if (k == juce::KeyPress::rightKey || k == juce::KeyPress::downKey) d = 1;
+        if (d == 0) return false;
+        setSelected (idx + d);
+        if (onChange) onChange();
+        return true;
+    }
+    std::unique_ptr<juce::AccessibilityHandler> createAccessibilityHandler() override
+    {
+        juce::AccessibilityHandler::Interfaces ifs;
+        auto v = std::make_unique<TextValue>();
+        v->get = [this] { return labels[juce::jlimit (0, labels.size() - 1, idx)]; };
+        v->set = [this] (const juce::String& s) { const int i = labels.indexOf (s); if (i >= 0) { setSelected (i); if (onChange) onChange(); } };
+        ifs.value = std::move (v);
+        return std::make_unique<juce::AccessibilityHandler> (*this, juce::AccessibilityRole::comboBox, juce::AccessibilityActions(), std::move (ifs));
+    }
     int selected() const noexcept { return idx; }
     void setSelected (int i) { idx = juce::jlimit (0, labels.size() - 1, i); repaint(); }
     void paint (juce::Graphics& g) override
@@ -401,6 +513,7 @@ public:
             if (on) { g.setColour (pal::amber.withMultipliedAlpha (a)); g.fillRoundedRectangle (cell.toFloat().reduced (1.f), 3.f); }
             drawText (g, labels[i], cell.reduced (2, 0), sans (11.f, true), (on ? pal::amberInk : pal::textSoft).withMultipliedAlpha (a), juce::Justification::centred);
         }
+        if (hasKeyboardFocus (false)) paintFocus (g, r.reduced (1.f), 4.f);
     }
     void mouseDown (const juce::MouseEvent& e) override
     {
