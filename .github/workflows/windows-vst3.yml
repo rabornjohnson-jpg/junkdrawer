@@ -8,12 +8,13 @@ jobs:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
+      - uses: ilammy/msvc-dev-cmd@v1
       - name: Configure
         shell: bash
         run: |
-          cmake -S . -B build -G "Visual Studio 17 2022" -A x64 > cfg.log 2>&1 || { echo "::error::$(tail -c 1500 cfg.log | sed ':a;N;$!ba;s/\n/%0A/g')"; exit 1; }
+          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release > cfg.log 2>&1 || { echo "::error::$(tail -c 1500 cfg.log | sed ':a;N;$!ba;s/\n/%0A/g')"; exit 1; }
       - name: Build
-        run: cmake --build build --config Release --target JunkDrawer_VST3
+        run: cmake --build build --target JunkDrawer_VST3
       - name: Collect the VST3
         shell: bash
         run: |
