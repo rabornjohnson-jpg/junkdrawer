@@ -86,7 +86,7 @@ Step-lane engine, LFO engine, file loading, DAW recording pipeline. Pull these i
 - Ratchet shapes: BUILT per track (lane Edit menu): Even, Fade out, Swell, Climb. Still open: bouncing and ratchet probability.
 - Region order: BUILT (per track, in the lane Edit menu): As written, Walk, Pendulum, Random. Still open: weighted random.
 - Region morphing: BUILT. A per-track Morph knob (LFO-assignable) in the Regions card blends each step's region with the next region, equal power; a second voice runs only while Morph is above zero.
-- Polymeter lane lengths.
+- Polymeter lane lengths: BUILT (every lane loops at its own length, set with the Steps buttons; tested).
 - Pattern chaining: BUILT. Eight patterns (A-H), a 16-slot chain with 1/2/4/8-bar lengths, changes on the bar line, saved with the project, followed by Export. Song page plus the lane Edit menu.
 - Rummage (randomize with locked lanes) and Shake (mutate amount).
 - Copy/paste, humanize (volume, length, timing) and reset for lanes: BUILT (the Edit button beside the step lanes). Paste goes into the same kind of lane on any track.

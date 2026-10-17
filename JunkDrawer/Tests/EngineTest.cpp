@@ -349,6 +349,24 @@ int main()
         setP (sq, "seq_run", 0.f);
     }
 
+    // polymeter: each lane loops at its own length
+    {
+        auto restart = [&] { setP (sq, "seq_run", 0.f); run (sq, 0.1, rate); setP (sq, "seq_run", 1.f); };
+        onlySteps ({ 0, 1, 2, 3, 4, 5, 6, 7 });
+        setP (sq, jd::laneLenId (0, jd::LaneVolume), 3.f);
+        setP (sq, jd::stepId (0, 0, jd::LaneVolume), 1.f);
+        setP (sq, jd::stepId (0, 1, jd::LaneVolume), 0.2f);
+        setP (sq, jd::stepId (0, 2, jd::LaneVolume), 0.2f);
+        restart();
+        o = run (sq, 0.8, rate);                                              // steps are 6000 samples at this tempo
+        check (win (o, 100, 900) > win (o, 6100, 6900) * 2.f && win (o, 18100, 18900) > win (o, 24100, 24900) * 2.f && win (o, 18100, 18900) > win (o, 12100, 12900) * 2.f, "a three-step volume lane loops under an eight-step region lane");
+        setP (sq, jd::laneLenId (0, jd::LaneVolume), 16.f);
+        setP (sq, jd::stepId (0, 1, jd::LaneVolume), 1.f);
+        setP (sq, jd::stepId (0, 2, jd::LaneVolume), 1.f);
+        setP (sq, "seq_run", 0.f);
+        onlySteps ({ 0, 2 });
+    }
+
     // region morph
     {
         auto restart = [&] { setP (sq, "seq_run", 0.f); run (sq, 0.1, rate); setP (sq, "seq_run", 1.f); };
