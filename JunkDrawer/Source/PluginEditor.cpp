@@ -176,7 +176,7 @@ struct JunkDrawerEditor::Header : juce::Component, juce::Timer, juce::ChangeList
         }
         tabs[0].setToggleState (true, juce::dontSendNotification);
         reduce.setButtonText ("Reduce motion");
-        reduce.getProperties().set ("mint", true);
+        reduce.getProperties().set ("switch", true);
         exportBtn.getProperties().set ("mint", true);
         reduce.setClickingTogglesState (true);
         reduce.setToggleState ((bool) ed.proc.state.state.getProperty ("reduceMotion", false), juce::dontSendNotification);
@@ -198,8 +198,8 @@ struct JunkDrawerEditor::Header : juce::Component, juce::Timer, juce::ChangeList
     {
         int x = 300;
         for (auto& b : tabs) { b.setBounds (x, 16, 60, 28); x += 64; }
-        reduce.setBounds (getWidth() - 44 - 110, 16, 110, 28);
-        exportBtn.setBounds (898, 16, 68, 28);
+        reduce.setBounds (getWidth() - 44 - 140, 16, 140, 28);
+        exportBtn.setBounds (896, 16, 64, 28);
     }
 
     void timerCallback() override
@@ -324,7 +324,7 @@ struct JunkDrawerEditor::Header : juce::Component, juce::Timer, juce::ChangeList
         }), false);
     }
 
-    juce::Rectangle<int> bpmArea() const { return { getWidth() - 44 - 110 - 12 - 130, 16, 130, 28 }; }
+    juce::Rectangle<int> bpmArea() const { return { getWidth() - 44 - 140 - 8 - 124, 16, 124, 28 }; }
 
     void paint (juce::Graphics& g) override
     {
@@ -347,7 +347,7 @@ struct JunkDrawerEditor::Header : juce::Component, juce::Timer, juce::ChangeList
 
         if (ed.proc.armedLfo() >= 0)
         {
-            const auto pill = bpmArea().withTrimmedLeft (-8).withTrimmedRight (-4);
+            const auto pill = bpmArea();
             g.setColour (pal::amber); g.fillRoundedRectangle (pill.toFloat(), 14.f);
             drawText (g, "Assigning L" + juce::String (ed.proc.armedLfo() + 1), pill, sans (12.f, true), pal::amberInk, juce::Justification::centred);
         }
@@ -726,7 +726,9 @@ struct StepGrid : juce::Component, juce::Timer, juce::SettableTooltipClient
             g.setGradientFill (juce::ColourGradient (juce::Colour (on ? 0xff3a1d0e : 0xff22130b), c.getX(), c.getY(), juce::Colour (on ? 0xff150a05 : 0xff160c07), c.getX(), c.getBottom(), false));
             g.fillRoundedRectangle (c, 4.f);
             const float v = plainValue (proc, jd::stepId (track, i, lane));
+            stepIndexForBadge = i;
             if (on) paintValue (g, c, v, count);
+            stepIndexForBadge = -1;
             drawText (g, juce::String (i + 1), { (int) c.getX(), (int) c.getBottom() - 15, (int) c.getWidth(), 14 }, mono (11.f), juce::Colour (0xffcdb589).withAlpha (on ? 1.f : 0.45f), juce::Justification::centred);
             if (glow[(size_t) i] > 0.f) { g.setColour (pal::amber.withAlpha (0.22f * glow[(size_t) i])); g.fillRoundedRectangle (c, 3.f); }
             if (i == cur) { g.setColour (pal::amber); g.drawRoundedRectangle (c.reduced (0.5f), 3.f, 2.f); }
@@ -746,6 +748,7 @@ struct StepGrid : juce::Component, juce::Timer, juce::SettableTooltipClient
         }
     }
 
+    int stepIndexForBadge = -1;
     void paintValue (juce::Graphics& g, juce::Rectangle<float> c, float v, int count)
     {
         const auto bar = juce::Rectangle<float> (c.getX() + 4.f, c.getY() + 18.f, c.getWidth() - 8.f, c.getHeight() - 38.f);
@@ -762,6 +765,18 @@ struct StepGrid : juce::Component, juce::Timer, juce::SettableTooltipClient
                     g.setGradientFill (juce::ColourGradient (juce::Colour (r < count ? 0x66f0a040 : 0x1af0a040), spot.getCentreX(), spot.getCentreY(), juce::Colours::transparentBlack, spot.getX(), spot.getY(), true));
                     g.fillEllipse (spot.expanded (3.f));
                     drawRegionPart (g, r, spot.reduced (3.f), r < count ? 1.f : 0.35f);
+                    if (stepIndexForBadge >= 0)
+                    {
+                        const int dir = juce::roundToInt (plainValue (proc, jd::stepId (track, stepIndexForBadge, jd::LaneDirection)));
+                        const int rat = juce::roundToInt (plainValue (proc, jd::stepId (track, stepIndexForBadge, jd::LaneRatchet)));
+                        const juce::String tag = dir == 2 ? juce::String ("rev") : rat > 1 ? "x" + juce::String (rat) : juce::String();
+                        if (tag.isNotEmpty())
+                        {
+                            const auto pill = juce::Rectangle<float> (c.getCentreX() - 12.f, c.getY() + 1.f, 24.f, 13.f);
+                            g.setColour (juce::Colour (0xfff3ead0)); g.fillRoundedRectangle (pill, 6.f);
+                            drawText (g, tag, pill.toNearestInt(), sans (11.f, true), juce::Colour (0xff2a1b10), juce::Justification::centred);
+                        }
+                    }
                 }
                 break;
             case jd::LaneVolume: fill (v); top (juce::String (juce::roundToInt (v * 100.f))); break;
@@ -1635,6 +1650,17 @@ struct JunkDrawerEditor::DrawerPage : juce::Component, juce::ChangeListener
             const float hz  = state.getRawParameterValue (jd::lfoId (index, "rate"))->load();
             const int div   = juce::roundToInt (state.getRawParameterValue (jd::lfoId (index, "div"))->load());
             drawText (g, "L" + juce::String (index + 1), { 8, 3, 30, 16 }, mono (12.f, true), pal::text);
+            if (auto* mc = currentMod())
+            {
+                int n = 0;
+                for (auto& l : mc->links()) if (l.lfo == index) ++n;
+                if (n > 0)
+                {
+                    const auto b = juce::Rectangle<float> ((float) getWidth() - 24.f, 5.f, 16.f, 16.f);
+                    g.setColour (juce::Colour (0xfff0b25a)); g.fillEllipse (b);
+                    drawText (g, juce::String (n), b.toNearestInt(), mono (11.f, true), juce::Colour (0xff2a1b10), juce::Justification::centred);
+                }
+            }
             if (dot != 0.f)
             {
                 g.setColour (pal::amber);
@@ -1655,7 +1681,7 @@ struct JunkDrawerEditor::DrawerPage : juce::Component, juce::ChangeListener
         Watch wShape, wRate, wDiv, wSync;
     };
 
-    struct TrackRow : juce::Component
+    struct TrackRow : juce::Component, juce::Timer
     {
         TrackRow (JunkDrawerProcessor& p, int t) : proc (p), track (t)
         {
@@ -1667,9 +1693,34 @@ struct JunkDrawerEditor::DrawerPage : juce::Component, juce::ChangeListener
             addAndMakeVisible (m); addAndMakeVisible (s_);
             am = std::make_unique<juce::ButtonParameterAttachment> (*s.getParameter (jd::trackId (t, "mute")), m, nullptr);
             as = std::make_unique<juce::ButtonParameterAttachment> (*s.getParameter (jd::trackId (t, "solo")), s_, nullptr);
+            wLevel = std::make_unique<Watch> (s, jd::trackId (t, "level"), *this);
         }
-        void resized() override { m.setBounds (204, 10, 22, 26); s_.setBounds (230, 10, 22, 26); }
-        void mouseDown (const juce::MouseEvent&) override { if (onPick) onPick (track); }
+        void visibilityChanged() override { if (isShowing()) startTimerHz (4); else stopTimer(); }
+        void timerCallback() override
+        {
+            juce::int64 h = 7;
+            for (int k = 0; k < jd::kSteps; ++k) h = h * 31 + juce::roundToInt (proc.state.getRawParameterValue (jd::stepId (track, k, jd::LaneRegion))->load());
+            h = h * 31 + proc.laneLength (track, jd::LaneRegion);
+            if (h != dotsSig) { dotsSig = h; repaint(); }
+        }
+        juce::int64 dotsSig = 0;
+        std::unique_ptr<Watch> wLevel;
+        juce::Rectangle<int> faderArea() const { return { 244, 8, 22, 64 }; }
+        void setLevelFromY (int y)
+        {
+            auto* p = proc.state.getParameter (jd::trackId (track, "level"));
+            p->setValueNotifyingHost (1.f - juce::jlimit (0.f, 1.f, (float) (y - 12) / 56.f));
+            repaint();
+        }
+        void resized() override { m.setBounds (200, 10, 22, 26); s_.setBounds (224, 10, 22, 26); }
+        void mouseDown (const juce::MouseEvent& e) override
+        {
+            if (onPick) onPick (track);
+            if (e.x >= 252) { fading = true; setLevelFromY (e.y); }
+        }
+        void mouseDrag (const juce::MouseEvent& e) override { if (fading) setLevelFromY (e.y); }
+        void mouseUp (const juce::MouseEvent&) override { fading = false; }
+        bool fading = false;
         void paint (juce::Graphics& g) override
         {
             auto r = getLocalBounds().toFloat();
@@ -1693,14 +1744,26 @@ struct JunkDrawerEditor::DrawerPage : juce::Component, juce::ChangeListener
 
             if (td != nullptr)
             {
-                const int n = juce::roundToInt (proc.state.getRawParameterValue (jd::trackId (track, "regions"))->load());
-                drawText (g, seconds (td->seconds()) + " " + juce::String::charToString (0x00b7) + " " + juce::String (n) + (n == 1 ? " region" : " regions"),
-                          { 46, 46, 200, 20 }, sans (12.f), juce::Colour (0xffd9c39a));
+                // sixteen little lamps: lit where a step plays a region
+                const int len = proc.laneLength (track, jd::LaneRegion);
+                for (int k = 0; k < jd::kSteps; ++k)
+                {
+                    const bool lit = k < len && proc.state.getRawParameterValue (jd::stepId (track, k, jd::LaneRegion))->load() > 0.5f;
+                    const float cx = 52.f + (float) k * 12.5f, cy = 56.f;
+                    if (lit) { g.setColour (juce::Colour (0x40ffa640)); g.fillEllipse (cx - 5.f, cy - 5.f, 10.f, 10.f); }
+                    g.setColour (lit ? juce::Colour (0xffffd27a) : juce::Colour (k < len ? 0xff5a3a22 : 0xff33200f));
+                    g.fillEllipse (cx - 2.5f, cy - 2.5f, 5.f, 5.f);
+                }
             }
             else
                 drawText (g, "Nothing in here yet.", { 46, 46, 200, 20 }, sans (12.f), juce::Colour (0xffd9c39a));
-            g.setColour (juce::Colour (0x80000000));
+            // level fader
+            g.setColour (juce::Colour (0x99000000));
             g.fillRoundedRectangle (252.f, 12.f, 8.f, 56.f, 3.f);
+            const float lv = proc.state.getParameter (jd::trackId (track, "level"))->getValue();
+            g.setGradientFill (juce::ColourGradient (juce::Colour (0xff9bb36a), 0.f, 12.f, juce::Colour (0xffd9a64a), 0.f, 68.f, false));
+            g.fillRoundedRectangle (252.f, 68.f - 56.f * lv, 8.f, 56.f * lv, 3.f);
+            g.setColour (pal::brassHi); g.fillRoundedRectangle (249.f, 66.f - 56.f * lv, 14.f, 4.f, 1.5f);
         }
         JunkDrawerProcessor& proc;
         int track;

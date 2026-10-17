@@ -138,6 +138,14 @@ struct LookAndFeel : juce::LookAndFeel_V4
     {
         auto r = b.getLocalBounds().toFloat().reduced (0.5f);
         const bool on = b.getToggleState();
+        if (b.getProperties().contains ("switch"))
+        {
+            const auto t = juce::Rectangle<float> ((float) b.getWidth() - 36.f, (float) b.getHeight() * 0.5f - 9.f, 34.f, 18.f);
+            g.setColour (on ? juce::Colour (0xffd9a64a) : pal::mintInk.withAlpha (0.35f)); g.fillRoundedRectangle (t, 9.f);
+            g.setColour (pal::mintInk.withAlpha (0.6f)); g.drawRoundedRectangle (t.reduced (0.5f), 9.f, 1.f);
+            g.setColour (juce::Colour (0xfffdf3d6)); g.fillEllipse (t.getX() + (on ? 18.f : 2.f), t.getY() + 2.f, 14.f, 14.f);
+            return;
+        }
         if (onMint (b))
         {
             g.setColour (on ? juce::Colour (0xffead79e) : juce::Colours::white.withAlpha (over || down ? 0.3f : 0.0f));
@@ -156,6 +164,12 @@ struct LookAndFeel : juce::LookAndFeel_V4
     {
         const bool on = b.getToggleState();
         g.setFont (getTextButtonFont (b, b.getHeight()));
+        if (b.getProperties().contains ("switch"))
+        {
+            g.setColour (pal::mintInk);
+            g.drawText (b.getButtonText(), b.getLocalBounds().withTrimmedRight (40), juce::Justification::centredRight, true);
+            return;
+        }
         if (onMint (b)) g.setColour (on ? juce::Colour (0xff2f1b06) : pal::mintInk);
         else g.setColour (on ? pal::amberInk : (b.isEnabled() ? pal::text : pal::textDim.withAlpha (0.6f)));
         g.drawText (b.getButtonText(), b.getLocalBounds().reduced (4, 0), juce::Justification::centred, true);
