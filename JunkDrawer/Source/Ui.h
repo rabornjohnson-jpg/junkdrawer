@@ -7,18 +7,33 @@
 // Shared look and small widgets.  Rules: no text below 11 px, nothing drawn outside its box, every control is a real parameter.
 namespace ui
 {
+// High contrast: one switch, read at paint time.  The editor rebuilds its controls when it changes.
+inline bool& highContrast() { static bool on = false; return on; }
+
 namespace pal
 {
+// A palette colour that has a standard value and a high contrast value.
+struct TC
+{
+    juce::uint32 standard, contrast;
+    constexpr TC (juce::uint32 s, juce::uint32 c) : standard (s), contrast (c) {}
+    juce::Colour get() const { return juce::Colour (highContrast() ? contrast : standard); }
+    operator juce::Colour() const { return get(); }
+    juce::Colour withAlpha (float a) const { return get().withAlpha (a); }
+    juce::Colour withMultipliedAlpha (float a) const { return get().withMultipliedAlpha (a); }
+    juce::Colour brighter (float a = 0.4f) const { return get().brighter (a); }
+    juce::Colour darker (float a = 0.4f) const { return get().darker (a); }
+};
 const juce::Colour counterTop   { 0xff313836 }, counterBottom { 0xff232827 };
 const juce::Colour wood         { 0xff6a4a2d }, woodDark { 0xff4b3320 }, woodLight { 0xff8a6a45 };
-const juce::Colour panel        { 0xcc120a05 };                       // dark panel, about 80 % opaque
-const juce::Colour text         { 0xfff3e7c9 }, textSoft { 0xffe0cd9f }, textDim { 0xffcdb98a };
-const juce::Colour amber        { 0xffe9b872 }, amberInk { 0xff1c1108 };
-const juce::Colour line         { 0x4df0e2c4 };                       // 30 % cream hairline
-const juce::Colour brass        { 0xffb8893a };
-const juce::Colour mint         { 0xffa7cbbc }, mintDark { 0xff6e9686 }, mintInk { 0xff17261f };   // the painted case
-const juce::Colour brassHi      { 0xffc9a24e }, brassDeep { 0xff5a431c };
-const juce::Colour bakelite     { 0xff5b2a22 }, bakeliteDark { 0xff321612 };
+const TC panel        { 0xcc120a05, 0xff000000 };                       // dark panel
+const TC text         { 0xfff3e7c9, 0xffffffff }, textSoft { 0xffe0cd9f, 0xfff4f4f4 }, textDim { 0xffcdb98a, 0xffdcdcdc };
+const TC amber        { 0xffe9b872, 0xffffd60a }, amberInk { 0xff1c1108, 0xff000000 };
+const TC line         { 0x4df0e2c4, 0xb3ffffff };                       // hairline
+const TC brass        { 0xffb8893a, 0xffffffff };
+const TC mint         { 0xffa7cbbc, 0xff0a0a0a }, mintDark { 0xff6e9686, 0xff2a2a2a }, mintInk { 0xff17261f, 0xffffffff };   // the painted case
+const TC brassHi      { 0xffc9a24e, 0xffffffff }, brassDeep { 0xff5a431c, 0xffc8c8c8 };
+const TC bakelite     { 0xff5b2a22, 0xff3a3a3a }, bakeliteDark { 0xff321612, 0xff000000 };
 }
 
 // Embedded typefaces: IBM Plex Sans, IBM Plex Mono, Fraunces and Special Elite (all SIL Open Font License).
@@ -72,9 +87,11 @@ struct LookAndFeel : juce::LookAndFeel_V4
     static juce::Image knobDisc (int d)
     {
         static std::map<int, juce::Image> cache;
-        auto it = cache.find (d);
+        const int key = d * 2 + (highContrast() ? 1 : 0);
+        auto it = cache.find (key);
         if (it != cache.end()) return it->second;
         const int px = d * 2;
+        const bool hc0 = highContrast();
         juce::Image img (juce::Image::ARGB, px, px, true);
         juce::Graphics g (img);
         const auto b = juce::Rectangle<float> ((float) px, (float) px).reduced (2.f);
@@ -90,17 +107,18 @@ struct LookAndFeel : juce::LookAndFeel_V4
         }
         g.setGradientFill (juce::ColourGradient (juce::Colour (0x00000000), c.x, c.y, juce::Colour (0x80000000), c.x + b.getWidth() * 0.5f, c.y, true));
         g.fillEllipse (b);
-        g.setColour (juce::Colour (0xd90a0402)); g.drawEllipse (b, 3.f);
+        g.setColour (hc0 ? juce::Colours::white : juce::Colour (0xd90a0402)); g.drawEllipse (b, hc0 ? 4.f : 3.f);
         g.setColour (juce::Colour (0x40ffc8aa)); g.drawEllipse (b.reduced (3.f), 2.f);
         const float cr = b.getWidth() * 0.285f;
-        juce::ColourGradient cap (juce::Colour (0xffecd584), c.x - cr * 0.4f, c.y - cr * 0.5f, juce::Colour (0xff8a6a2a), c.x + cr * 0.8f, c.y + cr, true);
+        const bool hc = highContrast();
+        juce::ColourGradient cap (hc ? juce::Colours::white : juce::Colour (0xffecd584), c.x - cr * 0.4f, c.y - cr * 0.5f, hc ? juce::Colour (0xffc8c8c8) : juce::Colour (0xff8a6a2a), c.x + cr * 0.8f, c.y + cr, true);
         g.setGradientFill (cap);
         g.fillEllipse (juce::Rectangle<float> (cr * 2.f, cr * 2.f).withCentre (c));
         g.setColour (juce::Colour (0x998a6a2a));
         for (float k : { 0.30f, 0.52f, 0.76f }) g.drawEllipse (juce::Rectangle<float> (cr * 2.f * k, cr * 2.f * k).withCentre (c), 1.6f);
         g.setColour (juce::Colour (0xff5a431c));
         g.drawEllipse (juce::Rectangle<float> (cr * 2.f, cr * 2.f).withCentre (c), 2.f);
-        cache[d] = img;
+        cache[key] = img;
         return img;
     }
 
@@ -119,8 +137,9 @@ struct LookAndFeel : juce::LookAndFeel_V4
 
         const float ang = a0 + pos * (a1 - a0);
         juce::Path tick;
-        tick.addRoundedRectangle (-1.1f, -d * 0.5f + 2.f, 2.2f, juce::jmax (4.f, d * 0.17f), 1.1f);
-        g.setColour (s.isEnabled() ? juce::Colour (0xfff3e1b0) : juce::Colour (0x66f3e1b0));
+        const float tw = highContrast() ? 3.6f : 2.2f;
+        tick.addRoundedRectangle (-tw * 0.5f, -d * 0.5f + 2.f, tw, juce::jmax (4.f, d * 0.17f), tw * 0.5f);
+        g.setColour (highContrast() ? (s.isEnabled() ? pal::amber.get() : pal::amber.withAlpha (0.4f)) : (s.isEnabled() ? juce::Colour (0xfff3e1b0) : juce::Colour (0x66f3e1b0)));
         g.fillPath (tick, juce::AffineTransform::rotation (ang).translated (c));
 
         if (s.hasKeyboardFocus (false))
@@ -148,16 +167,16 @@ struct LookAndFeel : juce::LookAndFeel_V4
         }
         if (onMint (b))
         {
-            g.setColour (on ? juce::Colour (0xffead79e) : juce::Colours::white.withAlpha (over || down ? 0.3f : 0.0f));
+            g.setColour (on ? (highContrast() ? pal::amber.get() : juce::Colour (0xffead79e)) : juce::Colours::white.withAlpha (over || down ? 0.3f : 0.0f));
             g.fillRoundedRectangle (r, 14.f);
-            g.setColour (on ? juce::Colour (0xff8a6a2a) : pal::mintInk.withAlpha (b.isEnabled() ? 0.5f : 0.25f));
-            g.drawRoundedRectangle (r, 14.f, on ? 1.5f : 1.f);
+            g.setColour (on ? (highContrast() ? juce::Colours::white : juce::Colour (0xff8a6a2a)) : (highContrast() ? pal::mintInk.get() : pal::mintInk.withAlpha (b.isEnabled() ? 0.5f : 0.25f)));
+            g.drawRoundedRectangle (r, 14.f, highContrast() ? 2.f : (on ? 1.5f : 1.f));
             return;
         }
         g.setColour (on ? pal::amber : juce::Colours::white.withAlpha (over || down ? 0.12f : 0.0f));
         g.fillRoundedRectangle (r, 4.f);
         g.setColour (on ? pal::amber : pal::line.withAlpha (b.isEnabled() ? 0.8f : 0.35f));
-        g.drawRoundedRectangle (r, 4.f, 1.f);
+        g.drawRoundedRectangle (r, 4.f, highContrast() ? 2.f : 1.f);
     }
 
     void drawButtonText (juce::Graphics& g, juce::TextButton& b, bool, bool) override
@@ -170,7 +189,7 @@ struct LookAndFeel : juce::LookAndFeel_V4
             g.drawText (b.getButtonText(), b.getLocalBounds().withTrimmedRight (40), juce::Justification::centredRight, true);
             return;
         }
-        if (onMint (b)) g.setColour (on ? juce::Colour (0xff2f1b06) : pal::mintInk);
+        if (onMint (b)) g.setColour (on ? (highContrast() ? juce::Colours::black : juce::Colour (0xff2f1b06)) : pal::mintInk.get());
         else g.setColour (on ? pal::amberInk : (b.isEnabled() ? pal::text : pal::textDim.withAlpha (0.6f)));
         g.drawText (b.getButtonText(), b.getLocalBounds().reduced (4, 0), juce::Justification::centred, true);
     }
@@ -381,9 +400,17 @@ private:
 
 //==============================================================================
 
+inline juce::Colour cream() { return highContrast() ? juce::Colours::white : juce::Colour (0xfff3ead0); }
+
 // A window lit from behind, in a brass frame: the same glass the waveform sits in.
 inline void paintGlass (juce::Graphics& g, juce::Rectangle<float> r)
 {
+    if (highContrast())
+    {
+        g.setColour (juce::Colours::white); g.fillRoundedRectangle (r.expanded (2.f), 7.f);
+        g.setColour (juce::Colours::black); g.fillRoundedRectangle (r, 5.f);
+        return;
+    }
     g.setGradientFill (juce::ColourGradient (pal::brassHi, 0.f, r.getY(), pal::brassDeep, 0.f, r.getBottom(), false));
     g.fillRoundedRectangle (r.expanded (2.f), 7.f);
     g.setGradientFill (juce::ColourGradient (juce::Colour (0xff9a4d1c), r.getCentreX(), r.getCentreY(), juce::Colour (0xff22100a), r.getX(), r.getY(), true));
@@ -403,6 +430,13 @@ struct Panel : juce::Component, private juce::ChangeListener
     void paint (juce::Graphics& g) override
     {
         auto r = getLocalBounds().toFloat();
+        if (highContrast())
+        {
+            g.setColour (juce::Colours::black); g.fillRoundedRectangle (r, 6.f);
+            g.setColour (highlighted ? pal::amber : juce::Colours::white); g.drawRoundedRectangle (r.reduced (1.f), 6.f, 2.f);
+            if (title.isNotEmpty()) drawText (g, title, { 14, 12, getWidth() - 200, 24 }, serif (17.f, true), juce::Colours::white);
+            return;
+        }
         g.setGradientFill (juce::ColourGradient (juce::Colour (0xf02e1a10), 0.f, 0.f, juce::Colour (0xf01a0d08), 0.f, r.getHeight(), false));
         g.fillRoundedRectangle (r, 6.f);
         g.setColour (highlighted ? pal::amber.withAlpha (0.8f) : pal::brassDeep.withAlpha (0.9f));
@@ -525,6 +559,16 @@ inline void addTopRoundedRect (juce::Path& p, float x, float y, float w, float h
 
 inline void paintCabinet (juce::Graphics& g)
 {
+    if (highContrast())
+    {
+        g.fillAll (juce::Colours::black);
+        const juce::Rectangle<float> hb (14.f, 8.f, 1252.f, 884.f);
+        juce::Path hp;
+        addTopRoundedRect (hp, hb.getX(), hb.getY(), hb.getWidth(), hb.getHeight(), 52.f, 10.f);
+        g.setColour (juce::Colour (0xff0a0a0a)); g.fillPath (hp);
+        g.setColour (juce::Colours::white); g.strokePath (hp, juce::PathStrokeType (3.f));
+        return;
+    }
     // the table the radio stands on
     g.setGradientFill (juce::ColourGradient (juce::Colour (0xff6a3720), 0, 0, juce::Colour (0xff40200f), 0, 900.f, false));
     g.fillAll();
@@ -555,33 +599,45 @@ inline void paintCabinet (juce::Graphics& g)
 // Grille cloth, a brass rim, and the brass-framed control strip, shared by the pages.  Page coordinates start 52 px down.
 inline juce::Image& clothTile()
 {
-    static juce::Image t = []
+    static juce::Image tiles[2];
+    auto& t = tiles[highContrast() ? 1 : 0];
+    if (! t.isValid())
     {
+        if (highContrast()) { t = juce::Image (juce::Image::ARGB, 1, 1, true); juce::Graphics (t).fillAll (juce::Colours::black); return t; }
         juce::Image i (juce::Image::ARGB, 3, 3, true);
         juce::Graphics g (i);
         g.fillAll (juce::Colour (0xff47301f));
         g.setColour (juce::Colour (0x24ffcd96)); g.fillRect (0, 0, 3, 1);
         g.setColour (juce::Colour (0x47000000)); g.fillRect (0, 0, 1, 3);
-        return i;
-    }();
+        t = i;
+    }
     return t;
 }
 inline juce::Image& latticeTile()
 {
-    static juce::Image t = []
+    static juce::Image tiles[2];
+    auto& t = tiles[highContrast() ? 1 : 0];
+    if (! t.isValid())
     {
+        if (highContrast()) { t = juce::Image (juce::Image::ARGB, 1, 1, true); juce::Graphics (t).fillAll (juce::Colours::black); return t; }
         juce::Image i (juce::Image::ARGB, 9, 9, true);
         juce::Graphics g (i);
         g.fillAll (juce::Colour (0xff1a0f0a));
         g.setColour (juce::Colour (0x28c9a24e));
         g.drawLine (0.f, 9.f, 9.f, 0.f, 1.f); g.drawLine (0.f, 0.f, 9.f, 9.f, 1.f);
-        return i;
-    }();
+        t = i;
+    }
     return t;
 }
 // The control strip: brass frame, faint lattice, then the dark panel.
 inline void paintStrip (juce::Graphics& g, juce::Rectangle<float> strip)
 {
+    if (highContrast())
+    {
+        g.setColour (juce::Colours::white); g.fillRoundedRectangle (strip.expanded (3.f), 6.f);
+        g.setColour (juce::Colours::black); g.fillRoundedRectangle (strip, 4.f);
+        return;
+    }
     g.setColour (pal::brassDeep);  g.fillRoundedRectangle (strip.expanded (4.f), 7.f);
     g.setColour (pal::brassHi);    g.fillRoundedRectangle (strip.expanded (3.f), 6.f);
     g.setTiledImageFill (latticeTile(), 0, 0, 1.f);
@@ -596,6 +652,12 @@ inline void paintDrawerFrame (juce::Graphics& g, bool tallFrontBoard)
 {
     juce::ignoreUnused (tallFrontBoard);
     const juce::Rectangle<float> cav (30.f, 108.f, 1220.f, 716.f);
+    if (highContrast())
+    {
+        g.setColour (juce::Colours::white); g.fillRoundedRectangle (cav.expanded (3.f), 18.f);
+        g.setColour (juce::Colours::black); g.fillRoundedRectangle (cav, 16.f);
+        return;
+    }
     g.setColour (pal::brassDeep);  g.fillRoundedRectangle (cav.expanded (6.f), 20.f);
     g.setGradientFill (juce::ColourGradient (pal::brassHi.brighter (0.2f), cav.getX(), cav.getY(), pal::brassHi.darker (0.3f), cav.getRight(), cav.getBottom(), false));
     g.fillRoundedRectangle (cav.expanded (5.f), 19.f);

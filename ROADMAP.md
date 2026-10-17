@@ -161,3 +161,5 @@ Step-lane engine, LFO engine, file loading, DAW recording pipeline. Pull these i
 - **UI mockups:** Drawer, LFOs and Master pages approved. Matrix page and Recording panel still to mock up. Published mockup: https://claude.ai/artifact/P7UF5UvDgqiwu8omARZ13H
 - **Fade vs ADSR:** the old Fade control was removed; ADSR replaces it.
 - **Plugin format:** Windows VST3 plus Standalone first, built with JUCE like DriftLooper.
+
+- **High contrast look (Oct 2026):** a header switch (next to Reduce motion) swaps the warm radio look for black, white and yellow with thick outlines and no glow. Saved with the project and remembered as the default for new instances (a small file in the Rotary Dial app-data folder). The screenshot tool takes JD_HC=1 to render it.

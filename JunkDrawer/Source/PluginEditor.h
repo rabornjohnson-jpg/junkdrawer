@@ -18,6 +18,7 @@ public:
     void openExport();                                      // the Export window
     juce::Component& exportWindow() noexcept { return *exportOverlay; }      // used by the screenshot tool
     int  currentPage() const noexcept { return page; }
+    void setHighContrast (bool on);                         // switches the look and rebuilds the controls
 
     static constexpr int kW = 1280, kH = 900;
 
@@ -31,6 +32,8 @@ private:
 
     void changeListenerCallback (juce::ChangeBroadcaster*) override { modCtx.changed.sendChangeMessage(); }
     void buildModContext();
+    void build();
+    void teardown();
 
     JunkDrawerProcessor& proc;
     ui::LookAndFeel lnf;

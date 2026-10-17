@@ -78,6 +78,7 @@ int main (int argc, char** argv)
 
     std::unique_ptr<juce::AudioProcessorEditor> ed (proc.createEditor());
     auto* editor = dynamic_cast<JunkDrawerEditor*> (ed.get());
+    if (juce::SystemStats::getEnvironmentVariable ("JD_HC", "0") == "1") editor->setHighContrast (true);
     const char* names[] = { "drawer", "lfos", "master", "matrix", "song" };
     int problems = 0;
 

@@ -178,6 +178,17 @@ struct JunkDrawerEditor::Header : juce::Component, juce::Timer, juce::ChangeList
         reduce.setButtonText ("Reduce motion");
         reduce.getProperties().set ("switch", true);
         exportBtn.getProperties().set ("mint", true);
+        hiCon.setButtonText ("High contrast");
+        hiCon.getProperties().set ("switch", true);
+        hiCon.setClickingTogglesState (true);
+        hiCon.setToggleState (highContrast(), juce::dontSendNotification);
+        hiCon.setTooltip ("A plainer look: black, white and yellow, thick outlines, no glow. Remembered for new instances too.");
+        hiCon.onClick = [this]
+        {
+            const bool v = hiCon.getToggleState();
+            juce::MessageManager::callAsync ([safe = juce::Component::SafePointer<JunkDrawerEditor> (&ed), v] { if (safe != nullptr) safe->setHighContrast (v); });
+        };
+        addAndMakeVisible (hiCon);
         reduce.setClickingTogglesState (true);
         reduce.setToggleState ((bool) ed.proc.state.state.getProperty ("reduceMotion", false), juce::dontSendNotification);
         reduce.setTooltip ("Turns off the fading glow on the playing step");
@@ -198,7 +209,8 @@ struct JunkDrawerEditor::Header : juce::Component, juce::Timer, juce::ChangeList
     {
         int x = 300;
         for (auto& b : tabs) { b.setBounds (x, 16, 60, 28); x += 64; }
-        reduce.setBounds (getWidth() - 44 - 140, 16, 140, 28);
+        reduce.setBounds (getWidth() - 44 - 150, 6, 150, 21);
+        hiCon.setBounds (getWidth() - 44 - 150, 28, 150, 21);
         exportBtn.setBounds (896, 16, 64, 28);
     }
 
@@ -324,11 +336,11 @@ struct JunkDrawerEditor::Header : juce::Component, juce::Timer, juce::ChangeList
         }), false);
     }
 
-    juce::Rectangle<int> bpmArea() const { return { getWidth() - 44 - 140 - 8 - 124, 16, 124, 28 }; }
+    juce::Rectangle<int> bpmArea() const { return { getWidth() - 44 - 150 - 8 - 112, 16, 112, 28 }; }
 
     void paint (juce::Graphics& g) override
     {
-        drawInkLogo (g, { 44, 14, 58, 30 });
+        if (highContrast()) drawLogo (g, { 44, 14, 58, 30 }); else drawInkLogo (g, { 44, 14, 58, 30 });
         drawText (g, "FADING FRACTAL AUDIO", { 112, 13, 180, 13 }, sans (11.f, true).withExtraKerningFactor (0.1f), pal::mintInk.withAlpha (0.8f));
         drawText (g, "Rotary Dial", { 112, 25, 180, 26 }, serif (23.f), pal::mintInk);
 
@@ -358,7 +370,7 @@ struct JunkDrawerEditor::Header : juce::Component, juce::Timer, juce::ChangeList
     JunkDrawerEditor& ed;
     std::array<juce::TextButton, NumPages> tabs;
     std::unique_ptr<juce::FileChooser> chooser;
-    juce::TextButton reduce, exportBtn;
+    juce::TextButton reduce, exportBtn, hiCon;
     double bpm = 0.0;
 };
 
@@ -407,7 +419,8 @@ struct WaveView : juce::Component, juce::SettableTooltipClient
         g.setGradientFill (juce::ColourGradient (pal::brassHi, 0.f, 0.f, pal::brassDeep, 0.f, r.getHeight(), false));
         g.fillRoundedRectangle (r, 12.f);
         const auto win = r.reduced (3.f);
-        g.setGradientFill (juce::ColourGradient (juce::Colour (0xffc2692a), win.getCentreX(), win.getCentreY(), juce::Colour (0xff2a1007), win.getX(), win.getY(), true));
+        if (highContrast()) g.setColour (juce::Colours::black);
+        else g.setGradientFill (juce::ColourGradient (juce::Colour (0xffc2692a), win.getCentreX(), win.getCentreY(), juce::Colour (0xff2a1007), win.getX(), win.getY(), true));
         g.fillRoundedRectangle (win, 10.f);
 
         auto td = proc.getTrack (track);
@@ -420,7 +433,7 @@ struct WaveView : juce::Component, juce::SettableTooltipClient
         g.saveState();
         juce::Path clip; clip.addRoundedRectangle (win, 10.f); g.reduceClipRegion (clip);
 
-        g.setColour (juce::Colour (0x1af6c27a));
+        g.setColour (highContrast() ? juce::Colour (0x55ffffff) : juce::Colour (0x1af6c27a));
         for (int q = 1; q < 8; ++q) g.fillRect ((float) w * (float) q / 8.f, 3.f, 1.f, (float) h - 6.f);
         for (int q = 1; q < 4; ++q) g.fillRect (3.f, (float) h * (float) q / 4.f, (float) w - 6.f, 1.f);
 
@@ -428,7 +441,7 @@ struct WaveView : juce::Component, juce::SettableTooltipClient
         {
             const float a = edge (i, false) * (float) w, b = edge (i, true) * (float) w;
             const auto box = juce::Rectangle<float> (juce::jmin (a, b), 3.f, std::abs (b - a), (float) h - 6.f);
-            if (i == selected) { g.setColour (juce::Colour (0x38ffe6a8)); g.fillRect (box); g.setColour (juce::Colour (0xaaffe6a8)); g.drawRect (box, 1.f); }
+            if (i == selected) { g.setColour (highContrast() ? juce::Colour (0x40ffd60a) : juce::Colour (0x38ffe6a8)); g.fillRect (box); g.setColour (highContrast() ? juce::Colour (0xffffffff) : juce::Colour (0xaaffe6a8)); g.drawRect (box, highContrast() ? 2.f : 1.f); }
             else { g.setColour (juce::Colour (i % 2 ? 0x1a000000 : 0x0d000000)); g.fillRect (box); }
         }
 
@@ -436,7 +449,7 @@ struct WaveView : juce::Component, juce::SettableTooltipClient
         for (int x = 0; x < w && x < (int) mins.size(); ++x)
         {
             const float top = (float) mid - maxs[(size_t) x] * (float) (mid - 8), bot = (float) mid - mins[(size_t) x] * (float) (mid - 8);
-            g.setColour (juce::Colour (0xfff6c46a).withAlpha (0.92f));
+            g.setColour (highContrast() ? pal::amber.get() : juce::Colour (0xfff6c46a).withAlpha (0.92f));
             g.fillRect ((float) x, top, 1.f, juce::jmax (1.f, bot - top));
         }
         g.restoreState();
@@ -610,9 +623,13 @@ struct RegionTag : Panel
         const auto ink = juce::Colour (0xff2a1b10), sub = juce::Colour (0xff5a4329);
         const auto r = getLocalBounds().toFloat();
         g.setColour (juce::Colour (0x66000000)); g.fillRoundedRectangle (r.translated (0.f, 3.f), 8.f);
-        g.setGradientFill (juce::ColourGradient (juce::Colour (0xfff7eed3), 0.f, 0.f, juce::Colour (0xffe9dcb8), 0.f, r.getHeight(), false));
-        g.fillRoundedRectangle (r, 8.f);
-        g.setColour (pal::brassDeep.withAlpha (0.7f)); g.drawRoundedRectangle (r.reduced (0.5f), 8.f, 1.f);
+        if (highContrast()) { g.setColour (juce::Colours::white); g.fillRoundedRectangle (r, 8.f); g.setColour (juce::Colours::black); g.drawRoundedRectangle (r.reduced (1.f), 8.f, 2.f); }
+        else
+        {
+            g.setGradientFill (juce::ColourGradient (juce::Colour (0xfff7eed3), 0.f, 0.f, juce::Colour (0xffe9dcb8), 0.f, r.getHeight(), false));
+            g.fillRoundedRectangle (r, 8.f);
+            g.setColour (pal::brassDeep.withAlpha (0.7f)); g.drawRoundedRectangle (r.reduced (0.5f), 8.f, 1.f);
+        }
         g.setGradientFill (juce::ColourGradient (pal::brassHi, 0.f, 0.f, pal::brassDeep, 0.f, 20.f, false));
         g.fillEllipse (r.getRight() - 24.f, 8.f, 12.f, 12.f);   // a little brass rivet
         drawRegionPart (g, reg, { 12.f, 8.f, 24.f, 24.f });
@@ -715,7 +732,7 @@ struct StepGrid : juce::Component, juce::Timer, juce::SettableTooltipClient
         const juce::Rectangle<float> strip ((float) labelW, 0.f, (float) stripW, (float) stripH);
         g.setGradientFill (juce::ColourGradient (pal::brassHi, 0.f, 0.f, pal::brassDeep, 0.f, (float) stripH, false));
         g.fillRoundedRectangle (strip, 7.f);
-        g.setColour (juce::Colour (0xff1e0f08));
+        g.setColour (highContrast() ? juce::Colours::black : juce::Colour (0xff1e0f08));
         g.fillRoundedRectangle (strip.reduced (2.5f), 5.f);
 
         const int len = proc.laneLength (track, lane), cur = currentIndex (lane), count = juce::roundToInt (plainValue (proc, jd::trackId (track, "regions")));
@@ -725,6 +742,7 @@ struct StepGrid : juce::Component, juce::Timer, juce::SettableTooltipClient
             const bool on = i < len;
             g.setGradientFill (juce::ColourGradient (juce::Colour (on ? 0xff3a1d0e : 0xff22130b), c.getX(), c.getY(), juce::Colour (on ? 0xff150a05 : 0xff160c07), c.getX(), c.getBottom(), false));
             g.fillRoundedRectangle (c, 4.f);
+            if (highContrast()) { g.setColour (juce::Colour (on ? 0xffffffff : 0x66ffffff)); g.drawRoundedRectangle (c.reduced (0.5f), 4.f, 1.f); }
             const float v = plainValue (proc, jd::stepId (track, i, lane));
             stepIndexForBadge = i;
             if (on) paintValue (g, c, v, count);
@@ -773,7 +791,7 @@ struct StepGrid : juce::Component, juce::Timer, juce::SettableTooltipClient
                         if (tag.isNotEmpty())
                         {
                             const auto pill = juce::Rectangle<float> (c.getCentreX() - 12.f, c.getY() + 1.f, 24.f, 13.f);
-                            g.setColour (juce::Colour (0xfff3ead0)); g.fillRoundedRectangle (pill, 6.f);
+                            g.setColour (cream()); g.fillRoundedRectangle (pill, 6.f);
                             drawText (g, tag, pill.toNearestInt(), sans (11.f, true), juce::Colour (0xff2a1b10), juce::Justification::centred);
                         }
                     }
@@ -973,7 +991,7 @@ struct RecPanel : juce::Component, juce::Timer
         update();
         const auto ink = juce::Colour (0xff2a1b10), red = juce::Colour (0xffb5532f), sub = juce::Colour (0xff5a4329);
         const auto r = getLocalBounds().toFloat();
-        g.setColour (juce::Colour (0xfff1e7c9)); g.fillRoundedRectangle (r, 3.f);
+        g.setColour (highContrast() ? juce::Colours::white : juce::Colour (0xfff1e7c9)); g.fillRoundedRectangle (r, 3.f);
         g.setColour (juce::Colour (0x4d5a3c1e)); g.drawRoundedRectangle (r.reduced (0.5f), 3.f, 1.f);
 
         const int st = proc.catchState();
@@ -1319,7 +1337,7 @@ struct Liner : juce::Component, juce::FileDragAndDropTarget
     {
         const auto ink = juce::Colour (0xff2a1b10);
         auto r = getLocalBounds().toFloat();
-        g.setGradientFill (juce::ColourGradient (juce::Colour (0xffd3c8a7), 0.f, 0.f, juce::Colour (0xffc2b58f), 0.f, r.getHeight(), false));
+        g.setGradientFill (highContrast() ? juce::ColourGradient (juce::Colours::white, 0.f, 0.f, juce::Colours::white, 0.f, r.getHeight(), false) : juce::ColourGradient (juce::Colour (0xffd3c8a7), 0.f, 0.f, juce::Colour (0xffc2b58f), 0.f, r.getHeight(), false));
         g.fillRect (r);
         g.setColour (juce::Colour (0x99281608));
         g.drawRect (r, 1.f);
@@ -1573,13 +1591,13 @@ struct Junk : juce::Component
     static void card (juce::Graphics& g, juce::Rectangle<float> r, const juce::String& title)
     {
         g.setColour (juce::Colour (0x66000000)); g.fillRoundedRectangle (r.translated (0.f, 4.f), 3.f);
-        g.setColour (juce::Colour (0xfff3ead0)); g.fillRoundedRectangle (r, 3.f);
+        g.setColour (cream()); g.fillRoundedRectangle (r, 3.f);
         drawText (g, title, { (int) r.getX() + 16, (int) r.getY() + 12, (int) r.getWidth() - 32, 16 }, sans (11.f, true).withExtraKerningFactor (0.16f), juce::Colour (0xff5a4329));
     }
 
     void paint (juce::Graphics& g) override
     {
-        g.setColour (juce::Colour (0xb8120903));
+        g.setColour (highContrast() ? juce::Colours::black : juce::Colour (0xb8120903));
         g.fillRect (getLocalBounds());
         card (g, { 14.f, 14.f, 212.f, 222.f }, "PATTERN");
         card (g, { 236.f, 14.f, 212.f, 222.f }, "REGIONS");
@@ -1724,13 +1742,13 @@ struct JunkDrawerEditor::DrawerPage : juce::Component, juce::ChangeListener
         void paint (juce::Graphics& g) override
         {
             auto r = getLocalBounds().toFloat();
-            g.setColour (juce::Colour (0xc7120905));
+            g.setColour (highContrast() ? juce::Colours::black : juce::Colour (0xc7120905));
             g.fillRoundedRectangle (r, 3.f);
-            g.setColour (picked ? pal::amber : juce::Colour (0x29ffebbe));
-            g.drawRoundedRectangle (r.reduced (0.5f), 3.f, picked ? 2.f : 1.f);
+            g.setColour (picked ? pal::amber.get() : (highContrast() ? juce::Colours::white : juce::Colour (0x29ffebbe)));
+            g.drawRoundedRectangle (r.reduced (0.5f), 3.f, picked || highContrast() ? 2.f : 1.f);
 
             const juce::Rectangle<float> badge (10.f, 10.f, 28.f, 28.f);
-            g.setGradientFill (juce::ColourGradient (juce::Colour (0xfff3dc98), 14.f, 14.f, juce::Colour (0xff6d4e1d), 34.f, 36.f, true));
+            g.setGradientFill (highContrast() ? juce::ColourGradient (juce::Colours::white, 14.f, 14.f, juce::Colour (0xffe0e0e0), 34.f, 36.f, true) : juce::ColourGradient (juce::Colour (0xfff3dc98), 14.f, 14.f, juce::Colour (0xff6d4e1d), 34.f, 36.f, true));
             g.fillEllipse (badge);
             drawText (g, juce::String (track + 1).paddedLeft ('0', 2), badge.toNearestInt(), mono (12.f, true), juce::Colour (0xff2a1b10), juce::Justification::centred);
 
@@ -2124,6 +2142,7 @@ struct JunkDrawerEditor::MasterPage : juce::Component
             {
                 g.setColour (juce::Colour (0x80000000));
                 g.fillRoundedRectangle (bar, 4.f);
+                if (highContrast()) { g.setColour (juce::Colours::white); g.drawRoundedRectangle (bar.reduced (0.5f), 4.f, 1.f); }
             }
             const float vals[] = { drawnL, drawnR };
             int k = 0;
@@ -2512,7 +2531,7 @@ struct JunkDrawerEditor::MatrixPage : juce::Component, juce::ChangeListener
         // how to hook one up
         const juce::Rectangle<float> card (948.f, 474.f, 288.f, 336.f);
         g.setColour (juce::Colour (0x66000000)); g.fillRoundedRectangle (card.translated (0.f, 4.f), 3.f);
-        g.setColour (juce::Colour (0xfff3ead0)); g.fillRoundedRectangle (card, 3.f);
+        g.setColour (cream()); g.fillRoundedRectangle (card, 3.f);
         const auto ink = juce::Colour (0xff2a1b10);
         drawText (g, "HOOK ONE UP", { 968, 492, 248, 16 }, sans (11.f, true).withExtraKerningFactor (0.16f), juce::Colour (0xff5a4329));
         const char* steps[] = { "Pick an LFO on the LFOs page, or click one in the top strip.", "Drag any knob up or down to set how much it moves.", "It lands in this list. Change the amount here or clear it." };
@@ -2570,7 +2589,7 @@ struct AboutPanel : juce::Component
         const auto c = cardArea();
         const auto ink = juce::Colour (0xff2a1b10), sub = juce::Colour (0xff5a4329);
         g.setColour (juce::Colour (0x99000000)); g.fillRoundedRectangle (c.toFloat().translated (0.f, 8.f).expanded (2.f), 8.f);
-        g.setColour (juce::Colour (0xfff3ead0)); g.fillRoundedRectangle (c.toFloat(), 6.f);
+        g.setColour (cream()); g.fillRoundedRectangle (c.toFloat(), 6.f);
         g.setColour (juce::Colour (0x665a3c1e)); g.drawRoundedRectangle (c.toFloat().reduced (0.5f), 6.f, 1.f);
         drawText (g, "Rotary Dial", { c.getX() + 28, c.getY() + 20, 400, 32 }, serif (26.f, false), ink);
         drawText (g, juce::String ("Version ") + kVersion + "  by Fading Fractal Audio", { c.getX() + 28, c.getY() + 54, 584, 18 }, sans (12.f), sub);
@@ -2849,7 +2868,7 @@ struct ExportPanel : juce::Component, juce::Timer
         const auto c = cardArea();
         const auto ink = juce::Colour (0xff2a1b10), sub = juce::Colour (0xff5a4329);
         g.setColour (juce::Colour (0x99000000)); g.fillRoundedRectangle (c.toFloat().translated (0.f, 8.f).expanded (2.f), 8.f);
-        g.setColour (juce::Colour (0xfff3ead0)); g.fillRoundedRectangle (c.toFloat(), 6.f);
+        g.setColour (cream()); g.fillRoundedRectangle (c.toFloat(), 6.f);
         g.setColour (juce::Colour (0x665a3c1e)); g.drawRoundedRectangle (c.toFloat().reduced (0.5f), 6.f, 1.f);
         drawText (g, "Export", { c.getX() + 28, c.getY() + 20, 400, 32 }, serif (26.f, false), ink);
         drawText (g, "Plays the pattern offline, with the LFOs and effects moving the whole way.", { c.getX() + 28, c.getY() + 54, 584, 18 }, sans (12.f), sub);
@@ -2896,7 +2915,7 @@ struct ExportPanel : juce::Component, juce::Timer
         {
             const auto r = getLocalBounds().toFloat();
             g.setColour (juce::Colour (0xcc000000)); g.fillRoundedRectangle (r.translated (0.f, 8.f), 6.f);
-            g.setColour (juce::Colour (0xfff3ead0)); g.fillRoundedRectangle (r, 6.f);
+            g.setColour (cream()); g.fillRoundedRectangle (r, 6.f);
             g.setColour (pal::brass); g.drawRoundedRectangle (r.reduced (1.f), 6.f, 2.f);
             drawText (g, "Where should exports go?", { 26, 20, getWidth() - 52, 30 }, serif (22.f, false), juce::Colour (0xff2a1b10));
             g.setFont (sans (13.f)); g.setColour (juce::Colour (0xff4a3320));
@@ -2926,6 +2945,14 @@ struct ExportPanel : juce::Component, juce::Timer
 };
 } // namespace
 
+namespace
+{
+juce::File themeFile()
+{
+    return juce::File::getSpecialLocation (juce::File::userApplicationDataDirectory).getChildFile ("Fading Fractal Audio").getChildFile ("Rotary Dial").getChildFile ("theme.txt");
+}
+}
+
 JunkDrawerEditor::JunkDrawerEditor (JunkDrawerProcessor& p) : AudioProcessorEditor (&p), proc (p)
 {
     setLookAndFeel (&lnf);
@@ -2935,6 +2962,15 @@ JunkDrawerEditor::JunkDrawerEditor (JunkDrawerProcessor& p) : AudioProcessorEdit
     currentMod() = &modCtx;
     proc.addChangeListener (this);
 
+    // this project's choice wins; a new instance starts from the last choice made anywhere
+    if (proc.state.state.hasProperty ("highContrast")) highContrast() = (bool) proc.state.state.getProperty ("highContrast");
+    else if (themeFile().existsAsFile()) highContrast() = themeFile().loadFileAsString().trim() == "1";
+
+    build();
+}
+
+void JunkDrawerEditor::build()
+{
     header = std::make_unique<Header> (*this);
     drawerPage = std::make_unique<DrawerPage> (*this);
     lfoPage = std::make_unique<LfoPage> (*this);
@@ -2948,8 +2984,26 @@ JunkDrawerEditor::JunkDrawerEditor (JunkDrawerProcessor& p) : AudioProcessorEdit
         addChildComponent (c);
     addChildComponent (*exportOverlay);
     addChildComponent (*aboutOverlay);
-    showPage (Drawer);
+    showPage (page);
     resized();
+}
+
+void JunkDrawerEditor::teardown()
+{
+    aboutOverlay.reset(); exportOverlay.reset();
+    songPage.reset(); matrixPage.reset(); masterPage.reset(); lfoPage.reset(); drawerPage.reset();
+    header.reset();
+}
+
+void JunkDrawerEditor::setHighContrast (bool on)
+{
+    highContrast() = on;
+    proc.state.state.setProperty ("highContrast", on, nullptr);
+    const auto f = themeFile();
+    if (f.getParentDirectory().createDirectory().wasOk()) f.replaceWithText (on ? "1" : "0");
+    teardown();
+    build();
+    repaint();
 }
 
 void JunkDrawerEditor::openAbout() { static_cast<AboutPanel&> (*aboutOverlay).open(); }
