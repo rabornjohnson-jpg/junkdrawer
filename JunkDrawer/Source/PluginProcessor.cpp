@@ -772,7 +772,18 @@ void JunkDrawerProcessor::writeTake (std::shared_ptr<juce::AudioBuffer<float>> t
 {
     const double rate = hostRate;
     const auto file = recordingsFolder().getNonexistentChildFile ("Track " + juce::String (track + 1) + " " + juce::Time::getCurrentTime().formatted ("%Y-%m-%d %H-%M-%S"), ".wav");
-    loader.addJob ([this, take, len, rate, file, track]
+    // Add mode: the take is mixed on top of what the track already holds, inside that sound's length, and the regions stay as they are.
+    const auto existing = catchAddWanted.load() ? getTrack (track) : nullptr;
+    const bool adding = existing != nullptr && std::abs (existing->sampleRate - rate) < 1.0;
+    if (adding)
+    {
+        auto mixed = std::make_shared<juce::AudioBuffer<float>> (2, existing->audio.getNumSamples());
+        for (int ch = 0; ch < 2; ++ch) mixed->copyFrom (ch, 0, existing->audio, juce::jmin (ch, existing->audio.getNumChannels() - 1), 0, existing->audio.getNumSamples());
+        const int n = juce::jmin (len, mixed->getNumSamples());
+        for (int ch = 0; ch < 2; ++ch) mixed->addFrom (ch, 0, *take, ch, 0, n);
+        take = mixed; len = mixed->getNumSamples();
+    }
+    loader.addJob ([this, take, len, rate, file, track, adding]
     {
         file.getParentDirectory().createDirectory();
         bool ok = false;
@@ -786,10 +797,10 @@ void JunkDrawerProcessor::writeTake (std::shared_ptr<juce::AudioBuffer<float>> t
             }
         }
         if (! alive.load()) return;
-        juce::MessageManager::callAsync ([this, ok, file, track]
+        juce::MessageManager::callAsync ([this, ok, file, track, adding]
         {
             if (! alive.load()) return;
-            if (ok) loadFile (track, file, true);
+            if (ok) loadFile (track, file, ! adding);
             else { const juce::ScopedLock sl (messageLock); loadMessage = "The recording could not be saved to " + file.getParentDirectory().getFullPathName(); sendChangeMessage(); }
         });
     });
@@ -1438,6 +1449,7 @@ void JunkDrawerProcessor::setStateInformation (const void* data, int size)
             loadPatternsFromState();
             drawerIndex = juce::jlimit (-1, drawerCount() - 1, (int) state.state.getProperty ("drawer", -1));
             listenWanted = (bool) state.state.getProperty ("listen", false);
+            catchAddWanted = (bool) state.state.getProperty ("catchAdd", false);
             syncRing();
             auto node = state.state.getChildWithName ("samples");
             for (int t = 0; t < jd::kTracks; ++t)

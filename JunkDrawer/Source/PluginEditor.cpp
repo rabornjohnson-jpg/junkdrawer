@@ -803,8 +803,10 @@ struct StepGrid : juce::Component, juce::Timer, juce::SettableTooltipClient
 // Catch something: the panel that takes the place of the waveform sheet while a take is set up or running.
 struct RecPanel : juce::Component, juce::Timer
 {
-    explicit RecPanel (Proc& p) : proc (p), input ({ "1 + 2", "Left", "Right" }), start ({ "Now", "Next bar", "Level" }), length ({ "Free", "1 bar", "2 bars", "4 bars" })
+    explicit RecPanel (Proc& p) : proc (p), input ({ "1 + 2", "Left", "Right" }), start ({ "Now", "Next bar", "Level" }), length ({ "Free", "1 bar", "2 bars", "4 bars" }), mode ({ "Replace", "Add" }, p.catchAdd() ? 1 : 0)
     {
+        mode.setTooltip ("Replace: the take takes the track's place. Add: the take is mixed on top of the sound already in the track, inside its length, and its regions stay put.");
+        mode.onChange = [this] { proc.setCatchAdd (mode.selected() == 1); };
         input.setTooltip ("Which input channels to record. Left or Right alone is copied to both sides.");
         start.setTooltip ("Now starts at once. Next bar waits for the next bar line while the host plays (with the host stopped it starts at once). Level waits for sound, and keeps the moment just before it.");
         length.setTooltip ("Free runs until you press Stop. A bar count stops by itself, up to the 60 second limit.");
@@ -829,7 +831,7 @@ struct RecPanel : juce::Component, juce::Timer
         grab.setButtonText ("Save last 30 s");
         grab.setTooltip ("Grab whatever just went by and put it in this track");
         grab.onClick = [this] { if (proc.catchLast (track) && onClose) onClose(); };
-        for (auto* c : std::initializer_list<juce::Component*> { &input, &start, &length, &go, &cancel, &listen, &grab }) addAndMakeVisible (*c);
+        for (auto* c : std::initializer_list<juce::Component*> { &input, &start, &length, &go, &cancel, &listen, &grab, &mode }) addAndMakeVisible (*c);
         update();
     }
     ~RecPanel() override { proc.setInputMeter (false); }
@@ -844,6 +846,7 @@ struct RecPanel : juce::Component, juce::Timer
     void timerCallback() override
     {
         shown = juce::jmax (proc.takeInputPeak(), shown * 0.86f);
+        if (shown >= 0.98f) clipHold = 60; else if (clipHold > 0) --clipHold;
         const bool active = proc.catchState() != Proc::CatchIdle;
         if (wasActive && ! active && onClose) { wasActive = false; onClose(); return; }
         wasActive = active;
@@ -857,6 +860,9 @@ struct RecPanel : juce::Component, juce::Timer
         for (auto* c : std::initializer_list<juce::Component*> { &input, &start, &length }) c->setEnabled (! active);
         listen.setVisible (! active);
         grab.setVisible (! active);
+        mode.setVisible (! active);
+        mode.setEnabled (proc.getTrack (track) != nullptr);
+        if (mode.selected() != (proc.catchAdd() ? 1 : 0)) mode.setSelected (proc.catchAdd() ? 1 : 0);
         grab.setEnabled (proc.listening() && proc.catchLastSeconds() >= 0.25f);
         listen.setToggleState (proc.listening(), juce::dontSendNotification);
         go.setButtonText (active ? "Stop" : "Record");
@@ -886,7 +892,9 @@ struct RecPanel : juce::Component, juce::Timer
         const juce::String stateLabel = running ? "CATCHING" : waiting ? (start.selected() == 1 ? "WAITING FOR THE BAR" : "WAITING FOR SOUND") : "READY";
         drawText (g, stateLabel, { 32, 10, 190, 20 }, sans (11.f, true).withExtraKerningFactor (0.14f), running ? red : sub);
         if (running) drawText (g, clock (proc.catchSeconds()), { 222, 10, 70, 20 }, mono (13.f, true), ink);
-        drawText (g, "Up to 1:00 per track", { 272, 10, 134, 20 }, sans (11.f), sub, juce::Justification::centredRight);
+        if (clipHold > 0) drawText (g, "Input too loud", { 140, 10, 140, 20 }, sans (11.f, true), red, juce::Justification::centredRight);
+        else if (st == Proc::CatchIdle) drawText (g, "Up to 1:00 per track", { 140, 10, 140, 20 }, sans (11.f), sub, juce::Justification::centredRight);
+        else drawText (g, "Up to 1:00 per track", { 272, 10, 134, 20 }, sans (11.f), sub, juce::Justification::centredRight);
 
         const juce::Rectangle<int> well (14, 34, 392, 164);
         g.setColour (juce::Colour (0xffe6dab6)); g.fillRoundedRectangle (well.toFloat(), 2.f);
@@ -943,6 +951,7 @@ struct RecPanel : juce::Component, juce::Timer
 
         g.setColour (juce::Colour (0xf0241710));
         for (auto* c : std::initializer_list<juce::Component*> { &input, &start, &length, &cancel }) g.fillRoundedRectangle (c->getBounds().toFloat(), 4.f);
+        if (mode.isVisible()) g.fillRoundedRectangle (mode.getBounds().toFloat(), 4.f);
         g.setColour (st == Proc::CatchIdle ? red : juce::Colour (0xf0241710));
         g.fillRoundedRectangle (go.getBounds().toFloat(), 4.f);
         if (st == Proc::CatchIdle) { g.setColour (juce::Colour (0xfffff4e0)); g.fillEllipse ((float) go.getX() + 22.f, (float) go.getBounds().getCentreY() - 4.5f, 9.f, 9.f); }
@@ -952,6 +961,7 @@ struct RecPanel : juce::Component, juce::Timer
     void resized() override
     {
         const int cx = 424;
+        mode.setBounds (14 + 392 - 108, 6, 108, 24);
         input.setBounds (cx, 23, 216, 24);
         start.setBounds (cx, 86, 216, 24);
         length.setBounds (cx, 132, 216, 24);
@@ -965,7 +975,8 @@ struct RecPanel : juce::Component, juce::Timer
     int track = 0;
     bool wasActive = false;
     float shown = 0.f;
-    ui::PickSeg input, start, length;
+    int clipHold = 0;
+    ui::PickSeg input, start, length, mode;
     juce::TextButton go, cancel, listen, grab;
     std::function<void()> onClose;
 };

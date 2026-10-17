@@ -55,14 +55,14 @@ Step-lane engine, LFO engine, file loading, DAW recording pipeline. Pull these i
 - Global defaults for step length and playback rate; per-step values are offsets from the default.
 - Swing and per-track lane length.
 
-### Stage 4: Recording (built: Record, input, start, length, 60 s cap; still to do: replace/overdub choice, Catch Last rolling buffer, save-to-file option, latency report, feedback warning)
+### Stage 4: Recording (built: Record, input, start, length, 60 s cap; also built: Catch Last rolling buffer, Replace/Add choice, input-too-loud warning, takes always saved as WAV files; not done: latency report, true feedback detection)
 - Per-track Record button, capturing from the plugin's audio input.
 - Sync options: immediate, next bar, or fixed length (1, 2, 4, 8 bars). Short pre-roll buffer.
-- Replace or overdub.
+- Replace or Add (overdub): BUILT. Add mixes the take on top inside the sound's current length; regions stay put.
 - Always-on rolling buffer ("Catch Last") that can be dragged into any track.
-- Waveform draws live while recording. Option to save a recording to file.
-- Per-track maximum length to cap memory use. Report latency correctly.
-- Feedback warning when recording the plugin's own output.
+- Waveform draws live while recording. Every take is saved as a 24-bit WAV in the Recordings folder (BUILT).
+- Per-track maximum length to cap memory use. Latency report: not possible from inside a plug-in (the host does not tell it the interface latency); the take starts when the audio arrives.
+- "Input too loud" warning when the input clips: BUILT. A real feedback check (the plug-in hearing its own output) is not built; the plug-in cannot see how the host routes things.
 
 ### Stage 5: LFOs
 - Six LFOs: sine, triangle, saw, square, sample and hold, smooth random, plus a slow "drift" shape.

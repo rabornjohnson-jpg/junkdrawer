@@ -1135,6 +1135,21 @@ int main()
         check (d != nullptr && std::abs (d->length() - (10 * 256 + (int) (rate * 2 / 256) * 256)) <= 512, "it holds everything heard so far");
         check (d != nullptr && std::abs (d->audio.getSample (0, d->length() - 100) - 0.25f) < 0.01f && std::abs (d->audio.getSample (1, d->length() - 100) + 0.25f) < 0.01f, "the newest sound is at the end, channels kept apart");
         check (d != nullptr && std::abs (d->audio.getSample (0, 100) - 0.8f) < 0.01f, "the oldest sound is at the start");
+        if (d != nullptr)
+        {
+            // Add mode mixes a new take on top, keeping the length
+            const int oldLen = d->length();
+            feed ((int) (rate * 1 / 256), 0.1f);
+            proc.setCatchAdd (true);
+            check (proc.catchLast (T), "a take can be caught in Add mode");
+            std::shared_ptr<const jd::TrackData> d2;
+            for (int i = 0; i < 100; ++i) { juce::MessageManager::getInstance()->runDispatchLoopUntil (50); d2 = proc.getTrack (T); if (d2 != d) break; }
+            check (d2 != nullptr && d2 != d && d2->length() == oldLen, "Add keeps the length of the sound that was there");
+            check (d2 != nullptr && std::abs (d2->audio.getSample (0, 100) - 0.9f) < 0.02f, "Add mixes the take on top at the start");
+            check (d2 != nullptr && std::abs (d2->audio.getSample (0, oldLen - 100) - 0.25f) < 0.02f, "and leaves the rest of the sound as it was");
+            proc.setCatchAdd (false);
+            if (d2 != nullptr) juce::File (d2->path).deleteFile();
+        }
         if (d != nullptr) juce::File (d->path).deleteFile();
         proc.clearTrack (T);
         check (proc.catchLastSeconds() == 0.f, "a catch empties the buffer");

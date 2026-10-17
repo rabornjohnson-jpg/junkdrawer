@@ -104,6 +104,8 @@ public:
     void setListening (bool on);
     bool listening() const noexcept { return listenWanted; }
     bool catchLast (int track);
+    void setCatchAdd (bool add) { catchAddWanted.store (add); state.state.setProperty ("catchAdd", add, nullptr); }
+    bool catchAdd() const noexcept { return catchAddWanted.load(); }      // true: a take is mixed on top of the track's sound instead of replacing it
     float catchLastSeconds() const;
 
     // Drawers (presets): 100 factory drawers first, then the ones the person saved.
@@ -206,6 +208,7 @@ private:
     std::unique_ptr<Ring> ring;
     bool listenWanted = false;
     void syncRing();
+    std::atomic<bool> catchAddWanted { false };
     void writeTake (std::shared_ptr<juce::AudioBuffer<float>> take, int len, int track);
     std::vector<jdp::Drawer> userDrawers;
     int drawerIndex = -1;
