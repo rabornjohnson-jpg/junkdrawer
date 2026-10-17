@@ -1,0 +1,23 @@
+name: Windows VST3
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure
+        run: cmake -S . -B build -G "Visual Studio 17 2022" -A x64
+      - name: Build
+        run: cmake --build build --config Release --target JunkDrawer_VST3
+      - name: Collect the VST3
+        shell: bash
+        run: |
+          mkdir out
+          cp -r "$(find build -type d -name 'Junk Drawer.vst3' | head -1)" out/
+      - uses: actions/upload-artifact@v4
+        with:
+          name: JunkDrawer-VST3-Windows
+          path: out

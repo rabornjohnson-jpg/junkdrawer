@@ -19,6 +19,8 @@ cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
 cmake --build build --target JunkDrawer_VST3     # or JunkDrawer_Standalone
 ```
 
+**Windows VST3 without a Windows machine:** every push to main runs the "Windows VST3" workflow on GitHub (Actions tab). Open the latest run, download the `JunkDrawer-VST3-Windows` zip, and copy the `Junk Drawer.vst3` folder into `C:\Program Files\Common Files\VST3`.
+
 JUCE 8.0.8 is fetched automatically. On Linux you need the usual JUCE dev packages (ALSA, X11, Xrandr, Xinerama, Xcursor, FreeType, fontconfig, GL).
 
 ## Look at every page and check the layout
