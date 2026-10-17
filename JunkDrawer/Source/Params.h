@@ -172,6 +172,8 @@ inline juce::AudioProcessorValueTreeState::ParameterLayout createLayout()
         addFloat (l, trackId (t, "pan"),   n + "pan",   { -1.f, 1.f, 0.001f }, 0.f);
         addFloat (l, trackId (t, "tune"),  n + "tune",  { -24.f, 24.f, 0.01f }, 0.f, semis());
         addChoice (l, trackId (t, "order"), n + "region order", { "As written", "Walk", "Pendulum", "Random" }, 0);
+        addFloat (l, trackId (t, "senddel"), n + "delay send",  { 0.f, 1.f, 0.001f }, 0.f, pct());
+        addFloat (l, trackId (t, "sendrev"), n + "reverb send", { 0.f, 1.f, 0.001f }, 0.f, pct());
         addFloat (l, trackId (t, "morph"), n + "morph", { 0.f, 1.f, 0.001f }, 0.f, pct());
         addChoice (l, trackId (t, "rshape"), n + "ratchet shape", { "Even", "Fade out", "Swell", "Climb" }, 0);
         addChoice (l, trackId (t, "cond"), n + "plays", { "Every loop", "Every 2nd loop", "Every 3rd loop", "Every 4th loop", "First loop only" }, 0);

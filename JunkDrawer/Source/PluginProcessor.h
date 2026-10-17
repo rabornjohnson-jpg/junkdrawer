@@ -236,7 +236,7 @@ private:
     std::atomic<float>* pVolume = nullptr;
     std::atomic<float>* pPan = nullptr;
 
-    struct TrackPtrs { std::atomic<float>* mute; std::atomic<float>* solo; std::atomic<float>* level; std::atomic<float>* pan; std::atomic<float>* tune; std::atomic<float>* order; std::atomic<float>* cond; std::atomic<float>* rshape; std::atomic<float>* morph; };
+    struct TrackPtrs { std::atomic<float>* mute; std::atomic<float>* solo; std::atomic<float>* level; std::atomic<float>* pan; std::atomic<float>* tune; std::atomic<float>* order; std::atomic<float>* cond; std::atomic<float>* rshape; std::atomic<float>* morph; std::atomic<float>* senddel; std::atomic<float>* sendrev; };
     std::array<TrackPtrs, jd::kTracks> tp {};
     struct RegionPtrs { std::atomic<float> *start, *end, *pitch, *gain, *pan, *cutoff, *reso, *drive, *attack, *decay, *sustain, *release, *loop, *reverse; };
     std::array<std::array<RegionPtrs, jd::kRegions>, jd::kTracks> rp {};
@@ -256,6 +256,11 @@ private:
     };
     std::array<SeqTrack, jd::kTracks> seq;
     jd::FxFilter fxFilter; jd::FxDelay fxDelay; jd::FxReverb fxReverb; jd::FxLimiter fxLimiter;
+    // Per-track sends: the tracks that use them feed these two buses, which run the Master page's Delay and Reverb settings wet-only.
+    jd::FxDelay sendDelay; jd::FxReverb sendVerb;
+    std::vector<float> sbDL, sbDR, sbVL, sbVR;
+    int sbCap = 0, tailDelay = 0, tailVerb = 0;
+    bool sendDelayWas = false, sendVerbWas = false;
     bool wasOn[4] = { false, false, false, false };
     double internalPpq = 0.0;
     bool seqWasRunning = false;

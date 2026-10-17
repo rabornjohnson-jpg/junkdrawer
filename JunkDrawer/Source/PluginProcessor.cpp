@@ -39,7 +39,7 @@ JunkDrawerProcessor::JunkDrawerProcessor()
         audition[(size_t) t] = 0; playing[(size_t) t] = 0; loadToken[(size_t) t] = 0;
         tp[(size_t) t] = { state.getRawParameterValue (jd::trackId (t, "mute")), state.getRawParameterValue (jd::trackId (t, "solo")),
                            state.getRawParameterValue (jd::trackId (t, "level")), state.getRawParameterValue (jd::trackId (t, "pan")),
-                           state.getRawParameterValue (jd::trackId (t, "tune")), state.getRawParameterValue (jd::trackId (t, "order")), state.getRawParameterValue (jd::trackId (t, "cond")), state.getRawParameterValue (jd::trackId (t, "rshape")), state.getRawParameterValue (jd::trackId (t, "morph")) };
+                           state.getRawParameterValue (jd::trackId (t, "tune")), state.getRawParameterValue (jd::trackId (t, "order")), state.getRawParameterValue (jd::trackId (t, "cond")), state.getRawParameterValue (jd::trackId (t, "rshape")), state.getRawParameterValue (jd::trackId (t, "morph")), state.getRawParameterValue (jd::trackId (t, "senddel")), state.getRawParameterValue (jd::trackId (t, "sendrev")) };
         for (int r = 0; r < jd::kRegions; ++r)
         {
             auto g = [&] (const char* s) { return state.getRawParameterValue (jd::regionId (t, r, s)); };
@@ -56,7 +56,7 @@ JunkDrawerProcessor::~JunkDrawerProcessor()
     loader.removeAllJobs (true, 5000);
 }
 
-void JunkDrawerProcessor::prepareToPlay (double sampleRate, int)
+void JunkDrawerProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
 {
     const bool rateChanged = std::abs (sampleRate - hostRate) > 0.5;
     hostRate = sampleRate;
@@ -67,6 +67,10 @@ void JunkDrawerProcessor::prepareToPlay (double sampleRate, int)
     pan.setCurrentAndTargetValue (pPan->load());
     for (auto& v : voices) { v.prepare (sampleRate); v.kill(); }
     for (auto& v : morphVoices) { v.prepare (sampleRate); v.kill(); }
+    sbCap = juce::jmax (4096, samplesPerBlock * 2);
+    for (auto* b : { &sbDL, &sbDR, &sbVL, &sbVR }) b->assign ((size_t) sbCap, 0.f);
+    sendDelay.prepare (sampleRate); sendVerb.prepare (sampleRate);
+    sendDelayWas = sendVerbWas = false; tailDelay = tailVerb = 0;
     fxFilter.prepare (sampleRate); fxDelay.prepare (sampleRate); fxReverb.prepare (sampleRate); fxLimiter.prepare (sampleRate);
     for (auto& b : wasOn) b = false;
     for (int i = 0; i < jd::kLfos; ++i) for (int k = 0; k < 9; ++k) { lfoAcc[i][k] = 0.0; lfoSince[i][k] = 0.0; lfoRestartBeat[i][k] = 0.0; lfoOut[i][k].store (0.f); }
@@ -317,14 +321,52 @@ void JunkDrawerProcessor::processBlock (juce::AudioBuffer<float>& buf, juce::Mid
     static const float ranges[] = { 12.f, 24.f, 48.f };
     const float masterPitch = juce::jlimit (-ranges[juce::jlimit (0, 2, juce::roundToInt (state.getRawParameterValue ("m_pitchrange")->load()))], ranges[juce::jlimit (0, 2, juce::roundToInt (state.getRawParameterValue ("m_pitchrange")->load()))], vId ("m_pitch"));
 
+    // Sends: which tracks feed the delay and reverb buses this block (only while that effect's card is on)
+    std::array<float, jd::kTracks> sendD {}, sendV {};
+    bool useSendD = false, useSendV = false;
+    if (n <= sbCap)
+    {
+        const bool dOn = vId ("fx_delay_on") > 0.5f, vOn = vId ("fx_reverb_on") > 0.5f;
+        for (int t = 0; t < jd::kTracks; ++t)
+        {
+            sendD[(size_t) t] = dOn ? juce::jlimit (0.f, 1.f, v (tp[(size_t) t].senddel)) : 0.f;
+            sendV[(size_t) t] = vOn ? juce::jlimit (0.f, 1.f, v (tp[(size_t) t].sendrev)) : 0.f;
+            useSendD = useSendD || sendD[(size_t) t] > 0.001f;
+            useSendV = useSendV || sendV[(size_t) t] > 0.001f;
+        }
+        if (useSendD) std::fill (sbDL.begin(), sbDL.begin() + n, 0.f), std::fill (sbDR.begin(), sbDR.begin() + n, 0.f);
+        if (useSendV) std::fill (sbVL.begin(), sbVL.begin() + n, 0.f), std::fill (sbVR.begin(), sbVR.begin() + n, 0.f);
+    }
+
     auto renderVoices = [&] (int from, int to)
     {
         if (to <= from) return;
         for (int t = 0; t < jd::kTracks; ++t)
         {
             const bool audible = tp[(size_t) t].mute->load() < 0.5f && (! anySolo || tp[(size_t) t].solo->load() > 0.5f);
-            if (audible) { voices[(size_t) t].render (l + from, r + from, to - from); if (morphVoices[(size_t) t].isActive()) morphVoices[(size_t) t].render (l + from, r + from, to - from); }
-            else         { voices[(size_t) t].kill(); morphVoices[(size_t) t].kill(); }
+            if (! audible) { voices[(size_t) t].kill(); morphVoices[(size_t) t].kill(); continue; }
+            const float sd = sendD[(size_t) t], sv = sendV[(size_t) t];
+            if (sd <= 0.001f && sv <= 0.001f)
+            {
+                voices[(size_t) t].render (l + from, r + from, to - from);
+                if (morphVoices[(size_t) t].isActive()) morphVoices[(size_t) t].render (l + from, r + from, to - from);
+                continue;
+            }
+            // a track with a send is rendered on its own so a copy can go to the bus
+            std::array<float, 256> tl, tr;
+            for (int pos = from; pos < to; pos += 256)
+            {
+                const int m = juce::jmin (256, to - pos);
+                std::fill (tl.begin(), tl.begin() + m, 0.f); std::fill (tr.begin(), tr.begin() + m, 0.f);
+                voices[(size_t) t].render (tl.data(), tr.data(), m);
+                if (morphVoices[(size_t) t].isActive()) morphVoices[(size_t) t].render (tl.data(), tr.data(), m);
+                for (int i = 0; i < m; ++i)
+                {
+                    l[pos + i] += tl[(size_t) i]; r[pos + i] += tr[(size_t) i];
+                    if (sd > 0.001f) { sbDL[(size_t) (pos + i)] += tl[(size_t) i] * sd; sbDR[(size_t) (pos + i)] += tr[(size_t) i] * sd; }
+                    if (sv > 0.001f) { sbVL[(size_t) (pos + i)] += tl[(size_t) i] * sv; sbVR[(size_t) (pos + i)] += tr[(size_t) i] * sv; }
+                }
+            }
         }
     };
 
@@ -514,6 +556,36 @@ void JunkDrawerProcessor::processBlock (juce::AudioBuffer<float>& buf, juce::Mid
             fxReverb.process (l, r, n);
             wasOn[2] = true;
         } else wasOn[2] = false;
+
+        // the send buses: the Master page's Delay and Reverb settings, wet only, added back in
+        const int tailLen = (int) (hostRate * 5.0);
+        if (n <= sbCap)
+        {
+            if (useSendD) tailDelay = tailLen;
+            if (tailDelay > 0 && P ("fx_delay_on") > 0.5f)
+            {
+                if (! sendDelayWas) sendDelay.reset();
+                sendDelay.wetOnly = true;
+                sendDelay.set (juce::roundToInt (P ("fx_delay_mode")), P ("fx_delay_time"), bpm, P ("fx_delay_fb"), P ("fx_delay_tone"), 1.f, juce::roundToInt (P ("fx_delay_style")) == 1);
+                if (! useSendD) { std::fill (sbDL.begin(), sbDL.begin() + n, 0.f); std::fill (sbDR.begin(), sbDR.begin() + n, 0.f); }
+                sendDelay.process (sbDL.data(), sbDR.data(), n);
+                for (int i = 0; i < n; ++i) { l[i] += sbDL[(size_t) i]; r[i] += sbDR[(size_t) i]; }
+                tailDelay = useSendD ? tailDelay : juce::jmax (0, tailDelay - n);
+                sendDelayWas = true;
+            } else { sendDelayWas = false; tailDelay = 0; }
+            if (useSendV) tailVerb = tailLen;
+            if (tailVerb > 0 && P ("fx_reverb_on") > 0.5f)
+            {
+                if (! sendVerbWas) sendVerb.reset();
+                sendVerb.wetOnly = true;
+                sendVerb.set (juce::roundToInt (P ("fx_reverb_mode")), P ("fx_reverb_size"), P ("fx_reverb_decay"), P ("fx_reverb_damp"), 1.f, juce::roundToInt (P ("fx_reverb_pre")));
+                if (! useSendV) { std::fill (sbVL.begin(), sbVL.begin() + n, 0.f); std::fill (sbVR.begin(), sbVR.begin() + n, 0.f); }
+                sendVerb.process (sbVL.data(), sbVR.data(), n);
+                for (int i = 0; i < n; ++i) { l[i] += sbVL[(size_t) i]; r[i] += sbVR[(size_t) i]; }
+                tailVerb = useSendV ? tailVerb : juce::jmax (0, tailVerb - n);
+                sendVerbWas = true;
+            } else { sendVerbWas = false; tailVerb = 0; }
+        }
 
         const float width = P ("m_width");
         if (std::abs (width - 1.f) > 0.002f)

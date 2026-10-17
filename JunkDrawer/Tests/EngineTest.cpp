@@ -349,6 +349,40 @@ int main()
         setP (sq, "seq_run", 0.f);
     }
 
+    // per-track sends
+    {
+        auto restart = [&] { setP (sq, "seq_run", 0.f); run (sq, 0.1, rate); setP (sq, "seq_run", 1.f); };
+        onlySteps ({ 0 });
+        setP (sq, "fx_delay_on", 1.f); setP (sq, "fx_delay_mix", 0.f); setP (sq, "fx_delay_time", 250.f); setP (sq, "fx_delay_mode", 0.f); setP (sq, "fx_delay_fb", 0.f);
+        setP (sq, "fx_reverb_on", 0.f);
+        restart();
+        o = run (sq, 0.4, rate);
+        const float dry = win (o, 100, 900), later = win (o, 12000 + 100, 12000 + 900);      // 250 ms is 12000 samples at 48 kHz
+        setP (sq, jd::trackId (0, "senddel"), 1.f);
+        restart();
+        o = run (sq, 0.4, rate);
+        check (win (o, 100, 900) > dry * 0.9f && win (o, 12100, 12900) > later + 0.02f, "a delay send adds an echo and leaves the dry sound alone");
+        setP (sq, jd::trackId (0, "senddel"), 0.f);
+        restart();
+        o = run (sq, 0.4, rate);
+        check (std::abs (win (o, 12100, 12900) - later) < 1.0e-4f, "with the send at zero the track is as it was");
+        setP (sq, "fx_delay_on", 0.f);
+        setP (sq, jd::trackId (0, "senddel"), 1.f);
+        restart();
+        o = run (sq, 0.4, rate);
+        check (std::abs (win (o, 12100, 12900) - later) < 1.0e-4f, "a send is silent while its effect is off");
+        setP (sq, jd::trackId (0, "senddel"), 0.f);
+        setP (sq, "fx_reverb_on", 1.f);
+        setP (sq, jd::trackId (0, "sendrev"), 1.f);
+        restart();
+        o = run (sq, 0.6, rate);
+        check (win (o, 14000, 20000) > later + 0.005f, "a reverb send adds a tail");
+        setP (sq, jd::trackId (0, "sendrev"), 0.f);
+        setP (sq, "fx_reverb_on", 0.f);
+        setP (sq, "seq_run", 0.f);
+        onlySteps ({ 0, 2 });
+    }
+
     // polymeter: each lane loops at its own length
     {
         auto restart = [&] { setP (sq, "seq_run", 0.f); run (sq, 0.1, rate); setP (sq, "seq_run", 1.f); };

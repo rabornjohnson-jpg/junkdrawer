@@ -1302,33 +1302,40 @@ struct Junk : juce::Component
         morphKnob->showText = false;
         morphKnob->slider.setTooltip ("Blends each step's region with the next region. 0 is the region alone, 100 is its neighbor.");
         addAndMakeVisible (*morphKnob);
+        sendDelKnob = std::make_unique<Knob> (proc.state, jd::trackId (t, "senddel"), "Delay", 38, juce::Colour (0xff2a1b10), juce::Colour (0xff5a4329));
+        sendRevKnob = std::make_unique<Knob> (proc.state, jd::trackId (t, "sendrev"), "Reverb", 38, juce::Colour (0xff2a1b10), juce::Colour (0xff5a4329));
+        sendDelKnob->slider.setTooltip ("How much of this track goes to the Delay. It uses the Delay settings on the Master page.");
+        sendRevKnob->slider.setTooltip ("How much of this track goes to the Reverb. It uses the Reverb settings on the Master page.");
+        addAndMakeVisible (*sendDelKnob); addAndMakeVisible (*sendRevKnob);
         resized();
         repaint();
     }
 
     void resized() override
     {
-        // pattern card at (14,14), regions card at (240,14); both 214 x 222
+        // pattern card at (14,14), regions card at (236,14); both 214 x 222
         div->setBounds (14 + 16, 14 + 36, 182, 24);
         feel->setBounds (14 + 16, 14 + 64, 182, 24);
         swing->setBounds (14 + 20, 14 + 96, 76, 76);
         tempo->setBounds (14 + 118, 14 + 96, 76, 76);
         run.setBounds (14 + 16, 14 + 184, 86, 28);
 
-        const int kx = 466 + 16;
+        const int kx = 458 + 16;
         rummage.setBounds (kx, 14 + 34, 88, 26);
         shakeBtn.setBounds (kx + 94, 14 + 34, 88, 26);
-        shakeAmt->setBounds (466 + 69, 14 + 66, 76, 76);
+        shakeAmt->setBounds (458 + 69, 14 + 66, 76, 76);
         for (int i = 0; i < jd::kRolled; ++i)
             keep[(size_t) i].setBounds (kx + (i % 3) * 62, 14 + 168 + (i / 3) * 26, 58, 24);
 
-        const int rx = 240 + 16;
+        const int rx = 236 + 16;
         sliceEq.setBounds (rx, 14 + 34, 88, 26);
         sliceHit.setBounds (rx + 94, 14 + 34, 88, 26);
         add.setBounds (rx, 14 + 66, 88, 26);
         sub.setBounds (rx + 94, 14 + 66, 88, 26);
         snap->setBounds (rx + 16, 14 + 116, 150, 26);
         if (morphKnob != nullptr) morphKnob->setBounds (rx + 54, 14 + 148, 30, 26);
+        if (sendDelKnob != nullptr) sendDelKnob->setBounds (680 + 20, 14 + 44, 76, 76);
+        if (sendRevKnob != nullptr) sendRevKnob->setBounds (680 + 118, 14 + 44, 76, 76);
         play.setBounds (rx, 14 + 184, 88, 26);
         stop.setBounds (rx + 94, 14 + 184, 88, 26);
     }
@@ -1344,32 +1351,25 @@ struct Junk : juce::Component
     {
         g.setColour (juce::Colour (0xb8120903));
         g.fillRect (getLocalBounds());
-        card (g, { 14.f, 14.f, 214.f, 222.f }, "PATTERN");
-        card (g, { 240.f, 14.f, 214.f, 222.f }, "REGIONS");
-        card (g, { 466.f, 14.f, 214.f, 222.f }, "RUMMAGE");
-        drawText (g, "Keep these lanes", { 466 + 16, 14 + 148, 182, 16 }, sans (11.f, true), juce::Colour (0xff5a4329));
-        drawText (g, "Morph", { 240 + 16, 14 + 150, 50, 22 }, sans (11.f, true), juce::Colour (0xff5a4329));
-        drawText (g, juce::String (juce::roundToInt (plainValue (proc, jd::trackId (track, "morph")) * 100.f)) + "%", { 240 + 16 + 98, 14 + 150, 60, 22 }, mono (11.f), juce::Colour (0xff5a4329));
+        card (g, { 14.f, 14.f, 212.f, 222.f }, "PATTERN");
+        card (g, { 236.f, 14.f, 212.f, 222.f }, "REGIONS");
+        card (g, { 458.f, 14.f, 212.f, 222.f }, "RUMMAGE");
+        drawText (g, "Keep these lanes", { 458 + 16, 14 + 148, 182, 16 }, sans (11.f, true), juce::Colour (0xff5a4329));
+        drawText (g, "Morph", { 236 + 16, 14 + 150, 50, 22 }, sans (11.f, true), juce::Colour (0xff5a4329));
+        drawText (g, juce::String (juce::roundToInt (plainValue (proc, jd::trackId (track, "morph")) * 100.f)) + "%", { 236 + 16 + 98, 14 + 150, 60, 22 }, mono (11.f), juce::Colour (0xff5a4329));
         padBehind (g, { &rummage, &shakeBtn, &keep[0], &keep[1], &keep[2], &keep[3], &keep[4], &keep[5], div.get(), feel.get(), &run, snap.get(), &sliceEq, &sliceHit, &add, &sub, &play, &stop });
-        drawText (g, "Snap edges to", { 240 + 16, 14 + 96, 182, 18 }, sans (11.f, true), juce::Colour (0xff5a4329));
+        drawText (g, "Snap edges to", { 236 + 16, 14 + 96, 182, 18 }, sans (11.f, true), juce::Colour (0xff5a4329));
 
-        const juce::Rectangle<float> plate (694.f, 50.f, 200.f, 150.f);
-        g.setGradientFill (juce::ColourGradient (juce::Colour (0xffe6cd84), plate.getX(), plate.getY(), juce::Colour (0xff8a6728), plate.getRight(), plate.getBottom(), false));
-        g.fillRoundedRectangle (plate, 3.f);
-        g.setColour (juce::Colour (0xff4a3413)); g.drawRoundedRectangle (plate.reduced (0.5f), 3.f, 1.f);
-        g.setColour (juce::Colour (0x59ffe9a8)); g.drawRoundedRectangle (plate.reduced (3.f), 2.f, 1.f);
-        const auto ink2 = juce::Colour (0xff3a2606);
-        g.setOpacity (0.85f);
-        drawLogo (g, { 744, 60, 100, 44 });
-        drawText (g, "FADING FRACTAL AUDIO", { 700, 108, 188, 14 }, sans (10.f, true).withExtraKerningFactor (0.1f), ink2, juce::Justification::centred);
-        drawText (g, "Junk Drawer", { 700, 122, 188, 36 }, serif (28.f), ink2, juce::Justification::centred);
-        drawText (g, "SAMPLE SEQUENCER", { 700, 162, 188, 14 }, sans (10.f, true).withExtraKerningFactor (0.1f), ink2, juce::Justification::centred);
+        card (g, { 680.f, 14.f, 212.f, 222.f }, "SENDS");
+        g.setColour (juce::Colour (0xff5a4329));
+        g.setFont (sans (11.f));
+        g.drawFittedText ("How much of this track goes to the Delay and the Reverb. They use the settings on the Master page, and go quiet when switched off there.", { 680 + 16, 14 + 152, 182, 62 }, juce::Justification::topLeft, 4, 1.f);
     }
 
     Proc& proc;
     int track = 0;
     std::unique_ptr<Seg> div, feel, snap;
-    std::unique_ptr<Knob> swing, tempo, shakeAmt, morphKnob;
+    std::unique_ptr<Knob> swing, tempo, shakeAmt, morphKnob, sendDelKnob, sendRevKnob;
     std::unique_ptr<Watch> wMorph;
     juce::TextButton rummage, shakeBtn;
     std::array<juce::TextButton, jd::kRolled> keep;

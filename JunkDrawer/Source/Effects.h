@@ -117,14 +117,14 @@ struct FxDelay
                 buf[1][(size_t) w] = inR + lp[1] * feedback;
             }
             w = (w + 1) % size;
-            ch[0][i] = inL + out[0] * mix;
-            ch[1][i] = inR + out[1] * mix;
+            ch[0][i] = (wetOnly ? 0.f : inL) + out[0] * mix;
+            ch[1][i] = (wetOnly ? 0.f : inR) + out[1] * mix;
         }
     }
     double rate = 44100.0;
     int size = 1, w = 0;
     float cur = 0.f, target = 1000.f, feedback = 0.f, mix = 0.f, lpCoef = 0.2f;
-    bool ping = false;
+    bool ping = false, wetOnly = false;                                   // wetOnly: a send bus, only the echoes come out
     float lp[2] = { 0.f, 0.f };
     std::array<std::vector<float>, 2> buf;
 };
@@ -177,13 +177,14 @@ struct FxReverb
                 else { tl[(size_t) i] = x; tr[(size_t) i] = y; }
             }
             verb.processStereo (tl.data(), tr.data(), m);
-            for (int i = 0; i < m; ++i) { a[i] = a[i] * (1.f - mix * 0.5f) + tl[(size_t) i] * mix; b[i] = b[i] * (1.f - mix * 0.5f) + tr[(size_t) i] * mix; }
+            for (int i = 0; i < m; ++i) { const float k = wetOnly ? 0.f : 1.f - mix * 0.5f; a[i] = a[i] * k + tl[(size_t) i] * mix; b[i] = b[i] * k + tr[(size_t) i] * mix; }
         }
     }
     double rate = 44100.0;
     juce::Reverb verb;
     int pre = 1, pw = 0, preSamples = 0;
     float mix = 0.f;
+    bool wetOnly = false;
     std::array<std::vector<float>, 2> preBuf;
 };
 
