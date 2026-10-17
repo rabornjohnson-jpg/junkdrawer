@@ -64,9 +64,21 @@ inline juce::Font typewriter (float h)
     return juce::Font (juce::FontOptions (f).withHeight (h));
 }
 
+// Contrast audit hook, used only by the screenshot tool: records every label drawn, where and in what colour.
+struct TextAudit { juce::Rectangle<float> r; juce::Colour c; juce::String t; float h; };
+inline std::vector<TextAudit>*& auditSink() { static std::vector<TextAudit>* p = nullptr; return p; }
+inline bool& auditHideText() { static bool b = false; return b; }
+inline juce::Point<float>& auditOrigin() { static juce::Point<float> p; return p; }
+inline void auditNote (juce::Graphics&, const juce::String& t, juce::Rectangle<int> r, juce::Colour c, float h)
+{
+    if (auto* s = auditSink()) s->push_back ({ r.toFloat().translated (auditOrigin().x, auditOrigin().y), c, t, h });
+}
+
 inline void drawText (juce::Graphics& g, const juce::String& t, juce::Rectangle<int> r, juce::Font f, juce::Colour c,
                       juce::Justification j = juce::Justification::centredLeft)
 {
+    auditNote (g, t, r, c, f.getHeight());
+    if (auditHideText()) return;
     g.setFont (f);
     g.setColour (c);
     g.drawText (t, r, j, true);
@@ -186,12 +198,16 @@ struct LookAndFeel : juce::LookAndFeel_V4
         if (b.getProperties().contains ("switch"))
         {
             g.setColour (pal::mintInk);
-            g.drawText (b.getButtonText(), b.getLocalBounds().withTrimmedRight (40), juce::Justification::centredRight, true);
+            auditNote (g, b.getButtonText(), b.getLocalBounds().withTrimmedRight (40), pal::mintInk, 12.f);
+            if (! auditHideText()) g.drawText (b.getButtonText(), b.getLocalBounds().withTrimmedRight (40), juce::Justification::centredRight, true);
             return;
         }
-        if (onMint (b)) g.setColour (on ? (highContrast() ? juce::Colours::black : juce::Colour (0xff2f1b06)) : pal::mintInk.get());
-        else g.setColour (on ? pal::amberInk : (b.isEnabled() ? pal::text : pal::textDim.withAlpha (0.6f)));
-        g.drawText (b.getButtonText(), b.getLocalBounds().reduced (4, 0), juce::Justification::centred, true);
+        juce::Colour tc;
+        if (onMint (b)) tc = on ? (highContrast() ? juce::Colours::black : juce::Colour (0xff2f1b06)) : pal::mintInk.get();
+        else tc = on ? pal::amberInk.get() : (b.isEnabled() ? pal::text.get() : pal::textDim.withAlpha (0.6f));
+        g.setColour (tc);
+        auditNote (g, b.getButtonText(), b.getLocalBounds().reduced (4, 0), tc, 12.f);
+        if (! auditHideText()) g.drawText (b.getButtonText(), b.getLocalBounds().reduced (4, 0), juce::Justification::centred, true);
     }
 };
 

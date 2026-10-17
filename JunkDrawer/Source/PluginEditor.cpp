@@ -355,7 +355,7 @@ struct JunkDrawerEditor::Header : juce::Component, juce::Timer, juce::ChangeList
         drawText (g, juce::String::charToString (0x203a), bar.toNearestInt().removeFromRight (30), sans (18.f, true), arrow, juce::Justification::centred);
         const int cur = ed.proc.currentDrawer();
         const auto label = cur < 0 ? juce::String ("Pick a station") : juce::String (cur + 1).paddedLeft ('0', 3) + " " + juce::String::charToString (0x00b7) + " " + ed.proc.drawer (cur).name;
-        drawText (g, label, bar.toNearestInt().reduced (32, 0), serif (16.f, true), cur < 0 ? juce::Colour (0xff7a5a2a) : juce::Colour (0xff2a1608), juce::Justification::centred);
+        drawText (g, label, bar.toNearestInt().reduced (32, 0), serif (16.f, true), cur < 0 ? juce::Colour (0xff3d2810) : juce::Colour (0xff2a1608), juce::Justification::centred);
 
         if (ed.proc.armedLfo() >= 0)
         {
@@ -1770,7 +1770,8 @@ struct JunkDrawerEditor::DrawerPage : juce::Component, juce::ChangeListener
                     const float cx = 52.f + (float) k * 12.5f, cy = 56.f;
                     if (lit) { g.setColour (juce::Colour (0x40ffa640)); g.fillEllipse (cx - 5.f, cy - 5.f, 10.f, 10.f); }
                     g.setColour (lit ? juce::Colour (0xffffd27a) : juce::Colour (k < len ? 0xff5a3a22 : 0xff33200f));
-                    g.fillEllipse (cx - 2.5f, cy - 2.5f, 5.f, 5.f);
+                    const float rad = lit ? 3.2f : 2.f;     // lit lamps are bigger too, so it is not only a color change
+                    g.fillEllipse (cx - rad, cy - rad, 2.f * rad, 2.f * rad);
                 }
             }
             else

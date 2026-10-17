@@ -1,3 +1,4 @@
+#include <set>
 // Renders every page to PNG and checks the layout: controls inside their panels, no two controls overlapping.
 // Usage:  JunkUiSnapshot <output folder>     (under xvfb-run on a machine without a display)
 #include "PluginEditor.h"
@@ -57,6 +58,54 @@ int checkLayout (juce::Component& root, const juce::String& page)
     return bad;
 }
 } // namespace
+
+
+// Contrast audit (JD_AUDIT=1): paint once to record every label, paint again with labels hidden to see what is behind each one.
+static juce::Image snap (JunkDrawerEditor& e) { return e.createComponentSnapshot (e.getLocalBounds(), true, 1.0f); }
+static double lum (juce::Colour c)
+{
+    auto f = [] (float v) { return v <= 0.03928f ? v / 12.92f : std::pow ((v + 0.055f) / 1.055f, 2.4f); };
+    return 0.2126 * f (c.getFloatRed()) + 0.7152 * f (c.getFloatGreen()) + 0.0722 * f (c.getFloatBlue());
+}
+// Paint every visible component on its own, remembering where it sits in the editor.
+static void paintAll (JunkDrawerEditor& root, juce::Component& c)
+{
+    if ((&c != &root && ! c.isVisible()) || c.getWidth() <= 0 || c.getHeight() <= 0) return;
+    const auto o = root.getLocalPoint (&c, juce::Point<int> (0, 0));
+    ui::auditOrigin() = o.toFloat();
+    juce::Image img (juce::Image::ARGB, c.getWidth(), c.getHeight(), true);
+    juce::Graphics g (img);
+    if (c.getNumChildComponents() == 0) c.paintEntireComponent (g, false); else c.paint (g);
+    for (auto* ch : c.getChildren()) paintAll (root, *ch);
+}
+
+static int auditPage (JunkDrawerEditor& e, const juce::String& name)
+{
+    std::vector<ui::TextAudit> v;
+    ui::auditSink() = &v; paintAll (e, e); ui::auditSink() = nullptr;
+    ui::auditHideText() = true; auto bgImg = snap (e); ui::auditHideText() = false;
+    { juce::PNGImageFormat png; juce::File f (juce::File::getCurrentWorkingDirectory().getChildFile ("audit_bg_" + name + ".png")); f.deleteFile(); juce::FileOutputStream fs (f); png.writeImageToStream (bgImg, fs); }
+    int bad = 0;
+    std::printf ("  [%s] audited %d labels\n", name.toRawUTF8(), (int) v.size());
+    std::set<juce::String> seen;
+    for (auto& a : v)
+    {
+        const auto r = a.r.toNearestInt().getIntersection (bgImg.getBounds());
+        if (r.isEmpty() || a.t.isEmpty()) continue;
+        double rr = 0, gg = 0, bb = 0; int n = 0;
+        for (int y = r.getY(); y < r.getBottom(); y += 2) for (int x = r.getX(); x < r.getRight(); x += 2) { auto p = bgImg.getPixelAt (x, y); rr += p.getFloatRed(); gg += p.getFloatGreen(); bb += p.getFloatBlue(); ++n; }
+        if (n == 0) continue;
+        const auto bg = juce::Colour::fromFloatRGBA ((float) (rr / n), (float) (gg / n), (float) (bb / n), 1.f);
+        const auto fg = bg.overlaidWith (a.c);
+        const double l1 = lum (fg), l2 = lum (bg), ratio = (std::max (l1, l2) + 0.05) / (std::min (l1, l2) + 0.05);
+        if (ratio < 4.5)
+        {
+            const auto key = a.t + "|" + juce::String (ratio, 1);
+            if (seen.insert (key).second) { std::printf ("  [%s] %.1f:1  '%s' at (%d,%d)  text %08x\n", name.toRawUTF8(), ratio, a.t.substring (0, 28).toRawUTF8(), r.getX(), r.getY(), (unsigned) a.c.getARGB()); ++bad; }
+        }
+    }
+    return bad;
+}
 
 int main (int argc, char** argv)
 {
@@ -147,6 +196,7 @@ int main (int argc, char** argv)
         juce::FileOutputStream fs (f);
         png.writeImageToStream (img, fs);
         problems += checkLayout (*editor, names[p]);
+        if (juce::SystemStats::getEnvironmentVariable ("JD_AUDIT", "0") == "1") auditPage (*editor, names[p]);
     }
     // the Chance and Timing lanes
     {
