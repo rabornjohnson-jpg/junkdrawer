@@ -332,19 +332,18 @@ struct JunkDrawerEditor::Header : juce::Component, juce::Timer, juce::ChangeList
         drawText (g, "FADING FRACTAL AUDIO", { 112, 13, 180, 13 }, sans (11.f, true).withExtraKerningFactor (0.1f), pal::mintInk.withAlpha (0.8f));
         drawText (g, "Rotary Dial", { 112, 25, 180, 26 }, serif (23.f), pal::mintInk);
 
-        // The preset window: a slide-rule strip with the station number, like a radio's tuning scale.
+        // The station window: brass frame, glass lit from behind.
         const juce::Rectangle<float> bar (626.f, 15.f, 262.f, 30.f);
-        g.setColour (pal::brassDeep);
-        g.fillRoundedRectangle (bar.expanded (2.f), 17.f);
-        g.setColour (juce::Colour (0xff2a1a0a));
-        g.fillRoundedRectangle (bar, 15.f);
-        g.setColour (juce::Colour (0xffe9b872).withAlpha (0.5f));
-        g.drawRoundedRectangle (bar.reduced (0.5f), 15.f, 1.f);
-        drawText (g, juce::String::charToString (0x2039), bar.toNearestInt().removeFromLeft (30), sans (16.f), juce::Colour (0xffe9b872).withAlpha (0.6f), juce::Justification::centred);
-        drawText (g, juce::String::charToString (0x203a), bar.toNearestInt().removeFromRight (30), sans (16.f), juce::Colour (0xffe9b872).withAlpha (0.6f), juce::Justification::centred);
+        g.setGradientFill (juce::ColourGradient (pal::brassHi, 0.f, bar.getY(), pal::brassDeep, 0.f, bar.getBottom(), false));
+        g.fillRoundedRectangle (bar.expanded (3.f), 9.f);
+        g.setGradientFill (juce::ColourGradient (juce::Colour (0xfffbe6a8), bar.getCentreX(), bar.getCentreY(), juce::Colour (0xffd98f36), bar.getX(), bar.getY(), true));
+        g.fillRoundedRectangle (bar, 6.f);
+        const auto arrow = juce::Colour (0xff4a2a0c);
+        drawText (g, juce::String::charToString (0x2039), bar.toNearestInt().removeFromLeft (30), sans (18.f, true), arrow, juce::Justification::centred);
+        drawText (g, juce::String::charToString (0x203a), bar.toNearestInt().removeFromRight (30), sans (18.f, true), arrow, juce::Justification::centred);
         const int cur = ed.proc.currentDrawer();
         const auto label = cur < 0 ? juce::String ("Pick a station") : juce::String (cur + 1).paddedLeft ('0', 3) + " " + juce::String::charToString (0x00b7) + " " + ed.proc.drawer (cur).name;
-        drawText (g, label, bar.toNearestInt().reduced (32, 0), serif (15.f, false), cur < 0 ? juce::Colour (0xffb09a72) : juce::Colour (0xfff6e8c9), juce::Justification::centred);
+        drawText (g, label, bar.toNearestInt().reduced (32, 0), serif (16.f, true), cur < 0 ? juce::Colour (0xff7a5a2a) : juce::Colour (0xff2a1608), juce::Justification::centred);
 
         if (ed.proc.armedLfo() >= 0)
         {
@@ -404,8 +403,12 @@ struct WaveView : juce::Component, juce::SettableTooltipClient
     void paint (juce::Graphics& g) override
     {
         auto r = getLocalBounds().toFloat();
-        g.setColour (juce::Colour (0xff1b120b));
-        g.fillRoundedRectangle (r, 4.f);
+        // brass frame around a window lit from behind, like a radio's glowing dial glass
+        g.setGradientFill (juce::ColourGradient (pal::brassHi, 0.f, 0.f, pal::brassDeep, 0.f, r.getHeight(), false));
+        g.fillRoundedRectangle (r, 12.f);
+        const auto win = r.reduced (3.f);
+        g.setGradientFill (juce::ColourGradient (juce::Colour (0xffc2692a), win.getCentreX(), win.getCentreY(), juce::Colour (0xff2a1007), win.getX(), win.getY(), true));
+        g.fillRoundedRectangle (win, 10.f);
 
         auto td = proc.getTrack (track);
         if (td == nullptr) return;
@@ -414,34 +417,48 @@ struct WaveView : juce::Component, juce::SettableTooltipClient
         const int w = getWidth(), h = getHeight(), mid = h / 2;
         const int n = regionCount();
 
+        g.saveState();
+        juce::Path clip; clip.addRoundedRectangle (win, 10.f); g.reduceClipRegion (clip);
+
+        g.setColour (juce::Colour (0x1af6c27a));
+        for (int q = 1; q < 8; ++q) g.fillRect ((float) w * (float) q / 8.f, 3.f, 1.f, (float) h - 6.f);
+        for (int q = 1; q < 4; ++q) g.fillRect (3.f, (float) h * (float) q / 4.f, (float) w - 6.f, 1.f);
+
         for (int i = 0; i < n; ++i)
         {
             const float a = edge (i, false) * (float) w, b = edge (i, true) * (float) w;
-            const auto box = juce::Rectangle<float> (juce::jmin (a, b), 2.f, std::abs (b - a), (float) h - 4.f);
-            g.setColour (regionTint (i).withAlpha (i == selected ? 0.34f : 0.16f));
-            g.fillRect (box);
+            const auto box = juce::Rectangle<float> (juce::jmin (a, b), 3.f, std::abs (b - a), (float) h - 6.f);
+            if (i == selected) { g.setColour (juce::Colour (0x38ffe6a8)); g.fillRect (box); g.setColour (juce::Colour (0xaaffe6a8)); g.drawRect (box, 1.f); }
+            else { g.setColour (juce::Colour (i % 2 ? 0x1a000000 : 0x0d000000)); g.fillRect (box); }
         }
 
-        g.setColour (pal::text.withAlpha (0.9f));
+        // the sound itself glows warm gold
         for (int x = 0; x < w && x < (int) mins.size(); ++x)
         {
-            const float top = (float) mid - maxs[(size_t) x] * (float) (mid - 6), bot = (float) mid - mins[(size_t) x] * (float) (mid - 6);
+            const float top = (float) mid - maxs[(size_t) x] * (float) (mid - 8), bot = (float) mid - mins[(size_t) x] * (float) (mid - 8);
+            g.setColour (juce::Colour (0xfff6c46a).withAlpha (0.92f));
             g.fillRect ((float) x, top, 1.f, juce::jmax (1.f, bot - top));
         }
+        g.restoreState();
 
         for (int i = 0; i < n; ++i)
         {
-            const float a = edge (i, false) * (float) w, b = edge (i, true) * (float) w;
+            const float a = juce::jmin (edge (i, false), edge (i, true)) * (float) w, b = juce::jmax (edge (i, false), edge (i, true)) * (float) w;
             const bool sel = i == selected;
-            g.setColour (regionTint (i).withAlpha (sel ? 1.f : 0.65f));
-            g.fillRect (a - 1.f, 2.f, 2.f, (float) h - 4.f);
-            g.fillRect (b - 1.f, 2.f, 2.f, (float) h - 4.f);
-            if (std::abs (b - a) > 26.f)
+            if (b - a > 40.f)
             {
-                const auto tab = juce::Rectangle<float> (juce::jmin (a, b) + 4.f, 6.f, 18.f, 16.f);
-                g.setColour (regionTint (i));
-                g.fillRoundedRectangle (tab, 3.f);
-                drawText (g, juce::String (i + 1), tab.toNearestInt(), mono (11.f, true), pal::amberInk, juce::Justification::centred);
+                const float cx = (a + b) * 0.5f;
+                drawRegionPart (g, i, { cx - 13.f, 8.f, 26.f, 26.f }, sel ? 1.f : 0.9f);
+                drawText (g, regionPartName (i), { (int) cx - 40, 36, 80, 14 }, sans (11.f, true), juce::Colour (0xfffbe9c2), juce::Justification::centred);
+            }
+            // brass grips on the region edges
+            for (float ex : { a, b })
+            {
+                const auto grip = juce::Rectangle<float> (ex - 5.f, (float) mid - 15.f, 10.f, 30.f);
+                g.setGradientFill (juce::ColourGradient (pal::brassHi, grip.getX(), 0.f, pal::brassDeep, grip.getRight(), 0.f, false));
+                g.fillRoundedRectangle (grip, 4.f);
+                g.setColour (juce::Colour (0x99000000)); g.drawRoundedRectangle (grip.reduced (0.5f), 4.f, 1.f);
+                g.setColour (juce::Colour (0x59ffffff)); g.fillRect (grip.getCentreX() - 0.5f, grip.getY() + 6.f, 1.f, grip.getHeight() - 12.f);
             }
         }
     }
@@ -559,10 +576,10 @@ struct RegionTag : Panel
         auto& s = p.state;
         const char* ids[]   = { "pitch", "gain", "pan", "cutoff", "reso", "drive" };
         const char* names[] = { "Pitch", "Gain", "Pan", "Cutoff", "Reso", "Drive" };
-        for (int k = 0; k < 6; ++k) { main[(size_t) k] = std::make_unique<Knob> (s, jd::regionId (track, region, ids[k]), names[k], 38); addAndMakeVisible (*main[(size_t) k]); }
+        for (int k = 0; k < 6; ++k) { main[(size_t) k] = std::make_unique<Knob> (s, jd::regionId (track, region, ids[k]), names[k], 38, juce::Colour (0xff2a1b10), juce::Colour (0xff5a4329)); addAndMakeVisible (*main[(size_t) k]); }
         const char* eIds[]   = { "attack", "decay", "sustain", "release" };
         const char* eNames[] = { "A", "D", "S", "R" };
-        for (int k = 0; k < 4; ++k) { env[(size_t) k] = std::make_unique<Knob> (s, jd::regionId (track, region, eIds[k]), eNames[k], 30); addAndMakeVisible (*env[(size_t) k]); }
+        for (int k = 0; k < 4; ++k) { env[(size_t) k] = std::make_unique<Knob> (s, jd::regionId (track, region, eIds[k]), eNames[k], 30, juce::Colour (0xff2a1b10), juce::Colour (0xff5a4329)); addAndMakeVisible (*env[(size_t) k]); }
         loop = std::make_unique<Seg> (s, jd::regionId (track, region, "loop"), jd::kLoopModes);
         loop->setTooltip ("What happens when playback reaches the end of the region");
         addAndMakeVisible (*loop);
@@ -590,17 +607,27 @@ struct RegionTag : Panel
 
     void paint (juce::Graphics& g) override
     {
-        Panel::paint (g);
-        drawStripLabel (g, "REGION " + juce::String (reg + 1), 12, 12);
+        const auto ink = juce::Colour (0xff2a1b10), sub = juce::Colour (0xff5a4329);
+        const auto r = getLocalBounds().toFloat();
+        g.setColour (juce::Colour (0x66000000)); g.fillRoundedRectangle (r.translated (0.f, 3.f), 8.f);
+        g.setGradientFill (juce::ColourGradient (juce::Colour (0xfff7eed3), 0.f, 0.f, juce::Colour (0xffe9dcb8), 0.f, r.getHeight(), false));
+        g.fillRoundedRectangle (r, 8.f);
+        g.setColour (pal::brassDeep.withAlpha (0.7f)); g.drawRoundedRectangle (r.reduced (0.5f), 8.f, 1.f);
+        g.setGradientFill (juce::ColourGradient (pal::brassHi, 0.f, 0.f, pal::brassDeep, 0.f, 20.f, false));
+        g.fillEllipse (r.getRight() - 24.f, 8.f, 12.f, 12.f);   // a little brass rivet
+        drawRegionPart (g, reg, { 12.f, 8.f, 24.f, 24.f });
+        drawText (g, regionPartName (reg), { 44, 10, 120, 22 }, serif (17.f, true), ink);
         auto td = proc.getTrack (tr);
         const double dur = td != nullptr ? td->seconds() : 0.0;
         const float a = plainValue (proc, jd::regionId (tr, reg, "start")), b = plainValue (proc, jd::regionId (tr, reg, "end"));
-        drawText (g, "Start " + seconds (a * dur), { 12, 258, 100, 16 }, mono (11.f), pal::amber);
-        drawText (g, "End " + seconds (b * dur), { 12, 274, 100, 16 }, mono (11.f), pal::amber);
+        drawText (g, "Start " + seconds (a * dur), { 12, 258, 100, 16 }, mono (11.f), sub);
+        drawText (g, "End " + seconds (b * dur), { 12, 274, 100, 16 }, mono (11.f), sub);
         if (td != nullptr && (a != seenA || b != seenB || td.get() != seenData)) { seenA = a; seenB = b; seenData = td.get(); pitch = proc.regionPitch (tr, reg); }
-        drawText (g, pitch.found ? jd::noteText (pitch.midi) : juce::String ("no note"), { getWidth() - 12 - 90, 256, 90, 16 }, mono (11.f, true), pitch.found ? pal::text : pal::textDim, juce::Justification::centredRight);
+        drawText (g, pitch.found ? jd::noteText (pitch.midi) : juce::String ("no note"), { getWidth() - 12 - 90, 256, 90, 16 }, mono (11.f, true), pitch.found ? ink : sub.withAlpha (0.6f), juce::Justification::centredRight);
         tuneBtn.setEnabled (pitch.found);
-        drawStripLabel (g, "ENVELOPE", 12, 298);
+        drawText (g, "ENVELOPE", { 12, 298, 120, 14 }, sans (11.f, true).withExtraKerningFactor (0.16f), sub);
+        g.setColour (juce::Colour (0xf0241710));
+        for (auto* c : std::initializer_list<juce::Component*> { &rev, &tuneBtn, loop.get() }) g.fillRoundedRectangle (c->getBounds().toFloat(), 4.f);
     }
 
     Proc& proc;
@@ -686,16 +713,18 @@ struct StepGrid : juce::Component, juce::Timer, juce::SettableTooltipClient
         drawText (g, "Volume", { 0, overviewY, labelW - 6, overviewH }, sans (11.f, true), juce::Colour (0xff4a3320));
 
         const juce::Rectangle<float> strip ((float) labelW, 0.f, (float) stripW, (float) stripH);
-        g.setGradientFill (juce::ColourGradient (juce::Colour (0xff9a7a52), 0.f, 0.f, juce::Colour (0xff7f6038), 0.f, (float) stripH, false));
-        g.fillRoundedRectangle (strip, 5.f);
+        g.setGradientFill (juce::ColourGradient (pal::brassHi, 0.f, 0.f, pal::brassDeep, 0.f, (float) stripH, false));
+        g.fillRoundedRectangle (strip, 7.f);
+        g.setColour (juce::Colour (0xff1e0f08));
+        g.fillRoundedRectangle (strip.reduced (2.5f), 5.f);
 
         const int len = proc.laneLength (track, lane), cur = currentIndex (lane), count = juce::roundToInt (plainValue (proc, jd::trackId (track, "regions")));
         for (int i = 0; i < jd::kSteps; ++i)
         {
             const juce::Rectangle<float> c (cellX (i), 3.f, cellW(), (float) stripH - 6.f);
             const bool on = i < len;
-            g.setColour (juce::Colour (0xff2a1b10).withAlpha (on ? 0.6f : 0.22f));
-            g.fillRoundedRectangle (c, 3.f);
+            g.setGradientFill (juce::ColourGradient (juce::Colour (on ? 0xff3a1d0e : 0xff22130b), c.getX(), c.getY(), juce::Colour (on ? 0xff150a05 : 0xff160c07), c.getX(), c.getBottom(), false));
+            g.fillRoundedRectangle (c, 4.f);
             const float v = plainValue (proc, jd::stepId (track, i, lane));
             if (on) paintValue (g, c, v, count);
             drawText (g, juce::String (i + 1), { (int) c.getX(), (int) c.getBottom() - 15, (int) c.getWidth(), 14 }, mono (11.f), juce::Colour (0xffcdb589).withAlpha (on ? 1.f : 0.45f), juce::Justification::centred);
@@ -729,10 +758,10 @@ struct StepGrid : juce::Component, juce::Timer, juce::SettableTooltipClient
                 if (juce::roundToInt (v) > 0)
                 {
                     const int r = juce::roundToInt (v) - 1;
-                    const auto chip = c.withSizeKeepingCentre (c.getWidth() - 8.f, 30.f).withY (c.getY() + 14.f);
-                    g.setColour (regionTint (r).withAlpha (r < count ? 1.f : 0.35f));
-                    g.fillRoundedRectangle (chip, 4.f);
-                    drawText (g, juce::String (r + 1), chip.toNearestInt(), mono (13.f, true), pal::amberInk, juce::Justification::centred);
+                    const auto spot = c.withSizeKeepingCentre (c.getWidth() - 4.f, c.getWidth() - 4.f).withY (c.getY() + 12.f);
+                    g.setGradientFill (juce::ColourGradient (juce::Colour (r < count ? 0x66f0a040 : 0x1af0a040), spot.getCentreX(), spot.getCentreY(), juce::Colours::transparentBlack, spot.getX(), spot.getY(), true));
+                    g.fillEllipse (spot.expanded (3.f));
+                    drawRegionPart (g, r, spot.reduced (3.f), r < count ? 1.f : 0.35f);
                 }
                 break;
             case jd::LaneVolume: fill (v); top (juce::String (juce::roundToInt (v * 100.f))); break;
@@ -1375,31 +1404,48 @@ struct TuneDial : juce::Component, juce::SettableTooltipClient, juce::ChangeList
         const auto b = getLocalBounds().toFloat();
         const auto c = b.getCentre();
         const float R = juce::jmin (b.getWidth(), b.getHeight()) * 0.5f - 3.f;
-        // brass bezel, cream face
-        g.setColour (juce::Colour (0x59000000)); g.fillEllipse (c.x - R + 1.f, c.y - R + 3.f, 2.f * R - 2.f, 2.f * R - 3.f);
+        const float pi = juce::MathConstants<float>::pi;
+        // brass bezel, then a glowing amber glass face lit from behind
+        g.setColour (juce::Colour (0x66000000)); g.fillEllipse (c.x - R + 1.f, c.y - R + 3.f, 2.f * R - 2.f, 2.f * R - 3.f);
         g.setGradientFill (juce::ColourGradient (pal::brassHi, c.x - R, c.y - R, pal::brassDeep, c.x + R, c.y + R, false));
         g.fillEllipse (c.x - R, c.y - R, 2.f * R, 2.f * R);
-        const float f = R - 5.f;
-        g.setColour (juce::Colour (0xfff3ead0)); g.fillEllipse (c.x - f, c.y - f, 2.f * f, 2.f * f);
-        g.setColour (juce::Colour (0xff5a4329).withAlpha (0.6f)); g.drawEllipse (c.x - f, c.y - f, 2.f * f, 2.f * f, 1.f);
+        const float f = R - 7.f;
+        g.setColour (juce::Colour (0xff2a1408)); g.fillEllipse (c.x - f - 2.f, c.y - f - 2.f, 2.f * f + 4.f, 2.f * f + 4.f);
+        g.setGradientFill (juce::ColourGradient (juce::Colour (0xffffe3a0), c.x, c.y, juce::Colour (0xffc9631a), c.x + f, c.y, true));
+        g.fillEllipse (c.x - f, c.y - f, 2.f * f, 2.f * f);
 
-        const float pi = juce::MathConstants<float>::pi, a0 = -0.75f * pi, a1 = 0.75f * pi;
+        const float a0 = -0.75f * pi, a1 = 0.75f * pi;
         auto pt = [&] (float a, float r) { return juce::Point<float> (c.x + std::sin (a) * r, c.y - std::cos (a) * r); };
-        for (int i = 0; i <= 20; ++i)
+        const auto ink = juce::Colour (0xff4a1f0a);
+        for (int i = 0; i <= 50; ++i)
         {
-            const float a = a0 + (a1 - a0) * (float) i / 20.f;
+            const float a = a0 + (a1 - a0) * (float) i / 50.f;
             const bool big = i % 5 == 0;
-            g.setColour (juce::Colour (0xff5a4329));
-            g.drawLine ({ pt (a, f - 3.f), pt (a, f - (big ? 11.f : 7.f)) }, big ? 1.6f : 1.f);
+            g.setColour (ink);
+            g.drawLine ({ pt (a, f - 3.f), pt (a, f - (big ? 11.f : 7.f)) }, big ? 1.5f : 1.f);
+            if (big)
+                drawText (g, juce::String (i * 2), juce::Rectangle<int> (22, 14).withCentre (pt (a, f - 21.f).toInt()), sans (11.f, true), ink, juce::Justification::centred);
         }
+        // red pointer on the rim for the current station
         const int cur = proc.currentDrawer();
         const float t = cur < 0 ? 0.f : (float) juce::jmin (cur, 99) / 99.f;
         const float a = a0 + (a1 - a0) * t;
         juce::Path needle;
-        needle.addTriangle (pt (a, f - 8.f), pt (a + 1.5707963f, 2.6f), pt (a - 1.5707963f, 2.6f));
-        g.setColour (juce::Colour (0xffa63a1e)); g.fillPath (needle);
-        g.setColour (pal::brassDeep); g.fillEllipse (c.x - 6.f, c.y - 6.f, 12.f, 12.f);
-        g.setColour (pal::brassHi); g.fillEllipse (c.x - 4.f, c.y - 4.f, 8.f, 8.f);
+        needle.addTriangle (pt (a, f - 12.f), pt (a + 1.5707963f, f - 1.f).translated (0.f, 0.f), pt (a - 1.5707963f, f - 1.f));
+        juce::Path wedge;
+        wedge.addTriangle (pt (a, f - 13.f), pt (a + 0.11f, f + 1.f), pt (a - 0.11f, f + 1.f));
+        g.setColour (juce::Colour (0xffb8301a)); g.fillPath (wedge);
+        g.setColour (juce::Colour (0x66000000)); g.strokePath (wedge, juce::PathStrokeType (0.8f));
+
+        // the centre disc carries the mark and the name
+        const float cr = f * 0.46f;
+        g.setColour (pal::brassDeep); g.fillEllipse (c.x - cr - 2.f, c.y - cr - 2.f, 2.f * cr + 4.f, 2.f * cr + 4.f);
+        g.setGradientFill (juce::ColourGradient (juce::Colour (0xff4a2a1a), c.x, c.y - cr, juce::Colour (0xff1c0e08), c.x, c.y + cr, false));
+        g.fillEllipse (c.x - cr, c.y - cr, 2.f * cr, 2.f * cr);
+        g.setOpacity (0.9f);
+        g.drawImage (logoImage(), juce::Rectangle<float> (c.x - cr * 0.62f, c.y - cr * 0.62f, cr * 1.24f, cr * 0.62f), juce::RectanglePlacement::centred);
+        g.setOpacity (1.f);
+        drawText (g, "Rotary Dial", juce::Rectangle<int> ((int) (cr * 2.f), 14).withCentre ((c + juce::Point<float> (0.f, cr * 0.42f)).toInt()), serif (11.f), juce::Colour (0xfff6e8c9), juce::Justification::centred);
     }
 
     Proc& proc;
@@ -1467,8 +1513,11 @@ struct Junk : juce::Component
         morphKnob->showText = false;
         morphKnob->slider.setTooltip ("Blends each step's region with the next region. 0 is the region alone, 100 is its neighbor.");
         addAndMakeVisible (*morphKnob);
-        sendDelKnob = std::make_unique<Knob> (proc.state, jd::trackId (t, "senddel"), "Delay", 38, juce::Colour (0xff2a1b10), juce::Colour (0xff5a4329));
-        sendRevKnob = std::make_unique<Knob> (proc.state, jd::trackId (t, "sendrev"), "Reverb", 38, juce::Colour (0xff2a1b10), juce::Colour (0xff5a4329));
+        wSendD = std::make_unique<Watch> (proc.state, jd::trackId (t, "senddel"), *this);
+        wSendR = std::make_unique<Watch> (proc.state, jd::trackId (t, "sendrev"), *this);
+        sendDelKnob = std::make_unique<Knob> (proc.state, jd::trackId (t, "senddel"), "Delay", 26, juce::Colour (0xff2a1b10), juce::Colour (0xff5a4329));
+        sendRevKnob = std::make_unique<Knob> (proc.state, jd::trackId (t, "sendrev"), "Reverb", 26, juce::Colour (0xff2a1b10), juce::Colour (0xff5a4329));
+        sendDelKnob->showText = false; sendRevKnob->showText = false;
         sendDelKnob->slider.setTooltip ("How much of this track goes to the Delay. It uses the Delay settings on the Master page.");
         sendRevKnob->slider.setTooltip ("How much of this track goes to the Reverb. It uses the Reverb settings on the Master page.");
         addAndMakeVisible (*sendDelKnob); addAndMakeVisible (*sendRevKnob);
@@ -1499,9 +1548,9 @@ struct Junk : juce::Component
         sub.setBounds (rx + 94, 14 + 66, 88, 26);
         snap->setBounds (rx + 16, 14 + 116, 150, 26);
         if (morphKnob != nullptr) morphKnob->setBounds (rx + 54, 14 + 148, 30, 26);
-        dial->setBounds (680 + 58, 14 + 30, 96, 96);
-        if (sendDelKnob != nullptr) sendDelKnob->setBounds (680 + 10, 14 + 144, 86, 76);
-        if (sendRevKnob != nullptr) sendRevKnob->setBounds (680 + 116, 14 + 144, 86, 76);
+        dial->setBounds (706, 6, 172, 172);
+        if (sendDelKnob != nullptr) sendDelKnob->setBounds (688, 190, 38, 36);
+        if (sendRevKnob != nullptr) sendRevKnob->setBounds (792, 190, 38, 36);
         play.setBounds (rx, 14 + 184, 88, 26);
         stop.setBounds (rx + 94, 14 + 184, 88, 26);
     }
@@ -1526,8 +1575,14 @@ struct Junk : juce::Component
         padBehind (g, { &rummage, &shakeBtn, &keep[0], &keep[1], &keep[2], &keep[3], &keep[4], &keep[5], div.get(), feel.get(), &run, snap.get(), &sliceEq, &sliceHit, &add, &sub, &play, &stop });
         drawText (g, "Snap edges to", { 236 + 16, 14 + 96, 182, 18 }, sans (11.f, true), juce::Colour (0xff5a4329));
 
-        card (g, { 680.f, 14.f, 212.f, 222.f }, "STATION");
-        drawText (g, "SENDS", { 680 + 16, 14 + 130, 100, 14 }, sans (11.f, true).withExtraKerningFactor (0.16f), juce::Colour (0xff5a4329));
+        const auto warm = juce::Colour (0xfff0d9a8);
+        for (int k = 0; k < 2; ++k)
+        {
+            const int lx = (k == 0 ? 688 : 792) + 40;
+            const float v = plainValue (proc, jd::trackId (track, k == 0 ? "senddel" : "sendrev"));
+            drawText (g, k == 0 ? "Delay" : "Reverb", { lx, 190, 60, 16 }, sans (11.f, true), warm);
+            drawText (g, juce::String (juce::roundToInt (v * 100.f)) + "%", { lx, 207, 60, 16 }, mono (11.f), warm.withAlpha (0.75f));
+        }
 
     }
 
@@ -1535,7 +1590,7 @@ struct Junk : juce::Component
     int track = 0;
     std::unique_ptr<Seg> div, feel, snap;
     std::unique_ptr<Knob> swing, tempo, shakeAmt, morphKnob, sendDelKnob, sendRevKnob;
-    std::unique_ptr<Watch> wMorph;
+    std::unique_ptr<Watch> wMorph, wSendD, wSendR;
     std::unique_ptr<TuneDial> dial;
     juce::TextButton rummage, shakeBtn;
     std::array<juce::TextButton, jd::kRolled> keep;

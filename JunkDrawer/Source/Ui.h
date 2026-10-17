@@ -390,6 +390,87 @@ struct Panel : juce::Component, private juce::ChangeListener
     ModContext* ctx = nullptr;
 };
 
+
+//==============================================================================
+// Region parts: each of the six regions is a little radio part, drawn as vectors (cheap, and sharp at any size).
+inline const char* regionPartName (int i)
+{
+    static const char* n[] = { "Tube", "Cap", "Coil", "Dial", "Fuse", "Resistor" };
+    return n[juce::jlimit (0, 5, i)];
+}
+
+inline void drawRegionPart (juce::Graphics& g, int part, juce::Rectangle<float> box, float alpha = 1.f)
+{
+    const float sz = juce::jmin (box.getWidth(), box.getHeight());
+    if (sz < 6.f) return;
+    g.saveState();
+    g.addTransform (juce::AffineTransform::scale (sz / 24.f).translated (box.getCentreX() - sz * 0.5f, box.getCentreY() - sz * 0.5f));
+    g.setOpacity (alpha);
+    auto col = [&] (juce::uint32 c) { return juce::Colour (c).withMultipliedAlpha (alpha); };
+    switch (juce::jlimit (0, 5, part))
+    {
+        case 0: // vacuum tube
+        {
+            juce::Path glass; glass.addRoundedRectangle (7.f, 2.f, 10.f, 14.f, 5.f);
+            g.setGradientFill (juce::ColourGradient (col (0xfffbe9b8), 7.f, 4.f, col (0xffd9964a), 17.f, 16.f, false)); g.fillPath (glass);
+            g.setColour (col (0xff6b4520)); g.drawLine (10.f, 7.f, 10.f, 14.f, 1.f); g.drawLine (14.f, 7.f, 14.f, 14.f, 1.f); g.drawLine (10.f, 7.f, 14.f, 7.f, 1.f);
+            g.setColour (col (0xff3a2616)); g.fillRoundedRectangle (6.f, 15.f, 12.f, 4.f, 1.f);
+            g.setColour (col (0xffc9a24e)); for (int p = 0; p < 4; ++p) g.fillRect (7.f + (float) p * 3.3f, 19.f, 1.2f, 3.f);
+            break;
+        }
+        case 1: // electrolytic capacitor
+        {
+            g.setColour (col (0xff3f6fb5)); g.fillRoundedRectangle (6.f, 3.f, 12.f, 16.f, 2.f);
+            g.setColour (col (0xff8fb4ea).withMultipliedAlpha (0.8f)); g.fillRect (8.f, 5.f, 2.f, 12.f);
+            g.setColour (col (0xffb8bcc4)); g.fillRoundedRectangle (6.f, 3.f, 12.f, 3.f, 1.5f);
+            g.setColour (col (0xff2a2016)); g.drawLine (10.f, 19.f, 10.f, 23.f, 1.2f); g.drawLine (14.f, 19.f, 14.f, 23.f, 1.2f);
+            break;
+        }
+        case 2: // coil
+        {
+            g.setColour (col (0xff8a8f98)); g.drawLine (1.f, 12.f, 5.f, 12.f, 1.4f); g.drawLine (19.f, 12.f, 23.f, 12.f, 1.4f);
+            for (int k = 0; k < 6; ++k)
+            {
+                const float x = 4.6f + (float) k * 2.6f;
+                g.setColour (col (0xffb8632a)); g.fillRoundedRectangle (x, 5.f, 2.2f, 14.f, 1.f);
+                g.setColour (col (0xfff0b06a)); g.fillRect (x + 0.5f, 6.f, 0.8f, 12.f);
+            }
+            break;
+        }
+        case 3: // tuning dial
+        {
+            g.setColour (col (0xffc9a24e)); g.fillEllipse (2.f, 2.f, 20.f, 20.f);
+            g.setColour (col (0xff2a1a10)); g.fillEllipse (4.f, 4.f, 16.f, 16.f);
+            g.setColour (col (0xffe9c88a));
+            for (int k = 0; k < 7; ++k)
+            {
+                const float a = (-0.75f + 1.5f * (float) k / 6.f) * juce::MathConstants<float>::pi;
+                g.drawLine (12.f + std::sin (a) * 6.f, 12.f - std::cos (a) * 6.f, 12.f + std::sin (a) * 7.8f, 12.f - std::cos (a) * 7.8f, 0.9f);
+            }
+            g.setColour (col (0xffe9532a)); g.drawLine (12.f, 12.f, 15.5f, 7.5f, 1.3f);
+            break;
+        }
+        case 4: // glass fuse
+        {
+            g.setColour (col (0xff8a8f98)); g.drawLine (1.f, 12.f, 4.f, 12.f, 1.3f); g.drawLine (20.f, 12.f, 23.f, 12.f, 1.3f);
+            g.setColour (col (0xffeee6cf)); g.fillRoundedRectangle (4.f, 8.f, 16.f, 8.f, 2.f);
+            g.setColour (col (0xff9a8a68)); g.drawLine (6.f, 12.f, 18.f, 12.f, 0.8f);
+            g.setColour (col (0xffc9a24e)); g.fillRoundedRectangle (3.f, 7.f, 4.f, 10.f, 1.5f); g.fillRoundedRectangle (17.f, 7.f, 4.f, 10.f, 1.5f);
+            break;
+        }
+        default: // resistor
+        {
+            g.setColour (col (0xff8a8f98)); g.drawLine (1.f, 12.f, 5.f, 12.f, 1.3f); g.drawLine (19.f, 12.f, 23.f, 12.f, 1.3f);
+            g.setColour (col (0xffd9b98a)); g.fillRoundedRectangle (4.f, 7.f, 16.f, 10.f, 4.f);
+            g.setColour (col (0xff6b3a1c)); g.fillRect (8.f, 7.f, 2.f, 10.f);
+            g.setColour (col (0xff1c1410)); g.fillRect (12.f, 7.f, 2.f, 10.f);
+            g.setColour (col (0xffb5301e)); g.fillRect (16.f, 7.f, 2.f, 10.f);
+            break;
+        }
+    }
+    g.restoreState();
+}
+
 // Chip: rounded outlined label, used for "Hooked up" entries.
 inline int chipWidth (const juce::String& t) { return (int) std::ceil (sans (11.f, true).getStringWidthFloat (t)) + 18; }
 inline void drawChip (juce::Graphics& g, juce::Rectangle<int> r, const juce::String& t)
@@ -443,10 +524,7 @@ inline void paintCabinet (juce::Graphics& g)
     g.setColour (juce::Colour (0x806e8279));
     const int chips[][4] = { { 1190, 300, 4, 8 }, { 70, 520, 4, 9 }, { 1190, 780, 5, 7 }, { 30, 860, 9, 5 }, { 640, 872, 10, 4 } };
     for (auto& c : chips) g.fillRoundedRectangle ((float) c[0], (float) c[1], (float) c[2], (float) c[3], 1.5f);
-    // brass hairline inset from the edge
-    juce::Path inset;
-    addTopRoundedRect (inset, body.getX() + 9.f, body.getY() + 9.f, body.getWidth() - 18.f, body.getHeight() - 18.f, 26.f, 6.f);
-    g.setColour (juce::Colour (0x591e3c30)); g.strokePath (inset, juce::PathStrokeType (1.f));
+
 }
 
 // Grille cloth, a brass rim, and the brass-framed control strip, shared by the pages.  Page coordinates start 52 px down.
