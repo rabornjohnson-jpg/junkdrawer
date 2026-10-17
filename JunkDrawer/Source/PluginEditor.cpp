@@ -215,6 +215,8 @@ struct JunkDrawerEditor::Header : juce::Component, juce::Timer, juce::ChangeList
         m.addItem (100000, "Save this drawer as...");
         m.addItem (100003, "Export this drawer to a file...", ed.proc.currentDrawer() >= 0);
         m.addItem (100004, "Import drawers from files...");
+        m.addSeparator();
+        m.addItem (100005, "About and quick start...");
         if (ed.proc.currentDrawer() >= 100)
         {
             m.addItem (100001, "Rename this drawer...");
@@ -229,6 +231,7 @@ struct JunkDrawerEditor::Header : juce::Component, juce::Timer, juce::ChangeList
             if (r == 100002) { confirmDelete(); return; }
             if (r == 100003) { exportCurrent(); return; }
             if (r == 100004) { importFiles(); return; }
+            if (r == 100005) { ed.openAbout(); return; }
             ed.proc.loadDrawer (r - 1);
         });
     }
@@ -2339,6 +2342,58 @@ struct JunkDrawerEditor::MatrixPage : juce::Component, juce::ChangeListener
 
 //==============================================================================
 //==============================================================================
+// About and quick start: a dim sheet with a short tour.
+namespace
+{
+#ifdef JucePlugin_VersionString
+static const char* const kVersion = JucePlugin_VersionString;
+#else
+static const char* const kVersion = "0.1.0";
+#endif
+struct AboutPanel : juce::Component
+{
+    AboutPanel()
+    {
+        close.setButtonText ("Close");
+        close.setToggleState (true, juce::dontSendNotification);
+        close.onClick = [this] { setVisible (false); };
+        addAndMakeVisible (close);
+        setVisible (false);
+    }
+    void open() { setVisible (true); toFront (true); }
+    juce::Rectangle<int> cardArea() const { return { (getWidth() - 640) / 2, 110, 640, 500 }; }
+    void resized() override { const auto c = cardArea(); close.setBounds (c.getRight() - 28 - 96, c.getBottom() - 22 - 32, 96, 32); }
+    void mouseDown (const juce::MouseEvent&) override {}
+    void paint (juce::Graphics& g) override
+    {
+        g.fillAll (juce::Colour (0x9e0a0603));
+        const auto c = cardArea();
+        const auto ink = juce::Colour (0xff2a1b10), sub = juce::Colour (0xff5a4329);
+        g.setColour (juce::Colour (0x99000000)); g.fillRoundedRectangle (c.toFloat().translated (0.f, 8.f).expanded (2.f), 8.f);
+        g.setColour (juce::Colour (0xfff3ead0)); g.fillRoundedRectangle (c.toFloat(), 6.f);
+        g.setColour (juce::Colour (0x665a3c1e)); g.drawRoundedRectangle (c.toFloat().reduced (0.5f), 6.f, 1.f);
+        drawText (g, "Junk Drawer", { c.getX() + 28, c.getY() + 20, 400, 32 }, serif (26.f, false), ink);
+        drawText (g, juce::String ("Version ") + kVersion + "  by Fading Fractal Audio", { c.getX() + 28, c.getY() + 54, 584, 18 }, sans (12.f), sub);
+
+        static const char* heads[] = { "1. LOAD SOMETHING", "2. CHOOSE REGIONS", "3. PLAY IT ON STEPS", "4. SHAPE EACH STEP", "5. MOVE THINGS WITH LFOS", "6. CHAIN AND EXPORT" };
+        static const char* body[]  = {
+            "Drop an audio file on a track, or press Record to catch a sound from your input.",
+            "Mark regions on the waveform. Each region is one slice that a step can play.",
+            "Nothing sounds until a step asks for it. Press play in your host and the steps fire.",
+            "The lane tabs under the steps set region, volume, pitch, ratchet, direction, length, chance, timing and pan.",
+            "Click an LFO tile, then drag any knob up or down. How far you drag is how much it moves.",
+            "Song holds eight patterns and a chain that plays them in order. Export renders it to files." };
+        for (int i = 0; i < 6; ++i)
+        {
+            const int y = c.getY() + 94 + i * 62;
+            drawText (g, heads[i], { c.getX() + 28, y, 584, 16 }, sans (11.f, true).withExtraKerningFactor (0.14f), pal::amber.darker (0.3f));
+            drawText (g, body[i], { c.getX() + 28, y + 20, 584, 34 }, sans (13.f), ink, juce::Justification::topLeft);
+        }
+    }
+    juce::TextButton close;
+};
+} // namespace
+
 // Export window: a dim sheet over the whole editor with the options card, and the first-time folder prompt.
 namespace
 {
@@ -2687,14 +2742,17 @@ JunkDrawerEditor::JunkDrawerEditor (JunkDrawerProcessor& p) : AudioProcessorEdit
     matrixPage = std::make_unique<MatrixPage> (*this);
     songPage = std::make_unique<SongPage> (*this);
     exportOverlay = std::make_unique<ExportPanel> (proc);
+    aboutOverlay = std::make_unique<AboutPanel>();
     addAndMakeVisible (*header);
     for (juce::Component* c : { (juce::Component*) drawerPage.get(), (juce::Component*) lfoPage.get(), (juce::Component*) masterPage.get(), (juce::Component*) matrixPage.get(), (juce::Component*) songPage.get() })
         addChildComponent (c);
     addChildComponent (*exportOverlay);
+    addChildComponent (*aboutOverlay);
     showPage (Drawer);
     resized();
 }
 
+void JunkDrawerEditor::openAbout() { static_cast<AboutPanel&> (*aboutOverlay).open(); }
 void JunkDrawerEditor::openExport() { static_cast<ExportPanel&> (*exportOverlay).open(); }
 
 JunkDrawerEditor::~JunkDrawerEditor()
@@ -2750,4 +2808,5 @@ void JunkDrawerEditor::resized()
     for (juce::Component* c : { (juce::Component*) drawerPage.get(), (juce::Component*) lfoPage.get(), (juce::Component*) masterPage.get(), (juce::Component*) matrixPage.get(), (juce::Component*) songPage.get() })
         c->setBounds (0, 52, kW, kH - 52);
     if (exportOverlay != nullptr) exportOverlay->setBounds (getLocalBounds());
+    if (aboutOverlay != nullptr) aboutOverlay->setBounds (getLocalBounds());
 }

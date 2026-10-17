@@ -253,6 +253,12 @@ int main (int argc, char** argv)
         shot ("export.png");
         problems += checkLayout (editor->exportWindow(), "export");
 
+        editor->exportWindow().setVisible (false);
+        editor->openAbout();
+        shot ("about.png");
+        problems += checkLayout (editor->aboutWindow(), "about");
+        editor->aboutWindow().setVisible (false);
+
         st.mode = 0; st.save();
         editor->openExport();
         std::function<juce::TextButton*(juce::Component&)> findGo = [&] (juce::Component& c) -> juce::TextButton*

@@ -13,6 +13,8 @@ public:
 
     enum Page { Drawer, Lfos, Master, Matrix, Song, NumPages };
     void showPage (int page);
+    void openAbout();                                       // About and quick start
+    juce::Component& aboutWindow() noexcept { return *aboutOverlay; }
     void openExport();                                      // the Export window
     juce::Component& exportWindow() noexcept { return *exportOverlay; }      // used by the screenshot tool
     int  currentPage() const noexcept { return page; }
@@ -39,7 +41,7 @@ private:
     std::unique_ptr<MasterPage> masterPage;
     std::unique_ptr<MatrixPage> matrixPage;
     std::unique_ptr<SongPage> songPage;
-    std::unique_ptr<juce::Component> exportOverlay;
+    std::unique_ptr<juce::Component> exportOverlay, aboutOverlay;
     juce::TooltipWindow tooltip { this, 600 };
     int page = 0;
 
