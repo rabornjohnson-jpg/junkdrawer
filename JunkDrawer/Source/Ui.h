@@ -1,4 +1,5 @@
 #pragma once
+#include <map>
 #include <juce_audio_processors/juce_audio_processors.h>
 #include <juce_gui_basics/juce_gui_basics.h>
 #include <BinaryData.h>
@@ -15,6 +16,9 @@ const juce::Colour text         { 0xfff3e7c9 }, textSoft { 0xffe0cd9f }, textDim
 const juce::Colour amber        { 0xffe9b872 }, amberInk { 0xff1c1108 };
 const juce::Colour line         { 0x4df0e2c4 };                       // 30 % cream hairline
 const juce::Colour brass        { 0xffb8893a };
+const juce::Colour mint         { 0xffa7cbbc }, mintDark { 0xff6e9686 }, mintInk { 0xff17261f };   // the painted case
+const juce::Colour brassHi      { 0xffc9a24e }, brassDeep { 0xff5a431c };
+const juce::Colour bakelite     { 0xff5b2a22 }, bakeliteDark { 0xff321612 };
 }
 
 // Embedded typefaces: IBM Plex Sans, IBM Plex Mono, Fraunces and Special Elite (all SIL Open Font License).
@@ -64,32 +68,59 @@ struct LookAndFeel : juce::LookAndFeel_V4
         setColour (juce::TooltipWindow::outlineColourId, pal::brass);
     }
 
+    // Fluted bakelite skirt with a ringed brass cap and a cream pointer.  The disc is drawn once per size and reused.
+    static juce::Image knobDisc (int d)
+    {
+        static std::map<int, juce::Image> cache;
+        auto it = cache.find (d);
+        if (it != cache.end()) return it->second;
+        const int px = d * 2;
+        juce::Image img (juce::Image::ARGB, px, px, true);
+        juce::Graphics g (img);
+        const auto b = juce::Rectangle<float> ((float) px, (float) px).reduced (2.f);
+        const auto c = b.getCentre();
+        g.setColour (pal::bakeliteDark);
+        g.fillEllipse (b);
+        g.setColour (pal::bakelite);
+        for (int k = 0; k < 24; ++k)
+        {
+            juce::Path w;
+            w.addPieSegment (b, juce::degreesToRadians ((float) k * 15.f), juce::degreesToRadians ((float) k * 15.f + 7.5f), 0.f);
+            g.fillPath (w);
+        }
+        g.setGradientFill (juce::ColourGradient (juce::Colour (0x00000000), c.x, c.y, juce::Colour (0x80000000), c.x + b.getWidth() * 0.5f, c.y, true));
+        g.fillEllipse (b);
+        g.setColour (juce::Colour (0xd90a0402)); g.drawEllipse (b, 3.f);
+        g.setColour (juce::Colour (0x40ffc8aa)); g.drawEllipse (b.reduced (3.f), 2.f);
+        const float cr = b.getWidth() * 0.285f;
+        juce::ColourGradient cap (juce::Colour (0xffecd584), c.x - cr * 0.4f, c.y - cr * 0.5f, juce::Colour (0xff8a6a2a), c.x + cr * 0.8f, c.y + cr, true);
+        g.setGradientFill (cap);
+        g.fillEllipse (juce::Rectangle<float> (cr * 2.f, cr * 2.f).withCentre (c));
+        g.setColour (juce::Colour (0x998a6a2a));
+        for (float k : { 0.30f, 0.52f, 0.76f }) g.drawEllipse (juce::Rectangle<float> (cr * 2.f * k, cr * 2.f * k).withCentre (c), 1.6f);
+        g.setColour (juce::Colour (0xff5a431c));
+        g.drawEllipse (juce::Rectangle<float> (cr * 2.f, cr * 2.f).withCentre (c), 2.f);
+        cache[d] = img;
+        return img;
+    }
+
     void drawRotarySlider (juce::Graphics& g, int x, int y, int w, int h, float pos, float a0, float a1, juce::Slider& s) override
     {
-        const float d = (float) juce::jmin (w, h) - 4.f;
+        const int di = juce::jmax (8, juce::jmin (w, h) - 4);
+        const float d = (float) di;
         const auto b = juce::Rectangle<float> (d, d).withCentre ({ x + w * 0.5f, y + h * 0.5f });
         const auto c = b.getCentre();
 
         g.setColour (juce::Colours::black.withAlpha (0.45f));                                   // drop shadow
         g.fillEllipse (b.translated (0.f, 2.5f).expanded (0.5f));
-
-        juce::ColourGradient grad (juce::Colour (0xffcfa56d), c.x - d * 0.14f, c.y - d * 0.2f, juce::Colour (0xff6a4526), c.x + d * 0.5f, c.y + d * 0.55f, true);
-        grad.addColour (0.5, juce::Colour (0xffa07445));
-        g.setGradientFill (grad);
-        g.fillEllipse (b);
-
-        g.setColour (juce::Colour (0x333c200a));                                                  // growth rings
-        for (float k = 0.25f; k < 0.95f; k += 0.17f) g.drawEllipse (b.withSizeKeepingCentre (d * k, d * k), 1.f);
-
-        g.setColour (juce::Colour (0xb31c0e04));
-        g.drawEllipse (b, 1.5f);
-        g.setColour (juce::Colour (0x66ffebbe));
-        g.drawEllipse (b.reduced (1.5f), 1.f);
+        g.setImageResamplingQuality (juce::Graphics::highResamplingQuality);
+        g.setOpacity (s.isEnabled() ? 1.f : 0.5f);
+        g.drawImage (knobDisc (di), b, juce::RectanglePlacement::stretchToFit);
 
         const float ang = a0 + pos * (a1 - a0);
         juce::Path tick;
-        tick.addRoundedRectangle (-1.5f, -d * 0.5f + d * 0.1f, 3.f, d * 0.3f, 1.5f);
-        g.setColour (s.isEnabled() ? juce::Colour (0xff1d1008) : juce::Colour (0x661d1008));
+        tick.addRoundedRectangle (-1.1f, -d * 0.5f + 2.f, 2.2f, juce::jmax (4.f, d * 0.17f), 1.1f);
+        g.setColour (s.isEnabled() ? juce::Colour (0xfff3e1b0) : juce::Colour (0x66f3e1b0));
         g.fillPath (tick, juce::AffineTransform::rotation (ang).translated (c));
 
         if (s.hasKeyboardFocus (false))
@@ -101,10 +132,20 @@ struct LookAndFeel : juce::LookAndFeel_V4
 
     juce::Font getTextButtonFont (juce::TextButton&, int) override { return sans (12.f, true); }
 
+    static bool onMint (const juce::Component& c) { return (bool) c.getProperties().getWithDefault ("mint", false); }
+
     void drawButtonBackground (juce::Graphics& g, juce::Button& b, const juce::Colour&, bool over, bool down) override
     {
         auto r = b.getLocalBounds().toFloat().reduced (0.5f);
         const bool on = b.getToggleState();
+        if (onMint (b))
+        {
+            g.setColour (on ? juce::Colour (0xffead79e) : juce::Colours::white.withAlpha (over || down ? 0.3f : 0.0f));
+            g.fillRoundedRectangle (r, 14.f);
+            g.setColour (on ? juce::Colour (0xff8a6a2a) : pal::mintInk.withAlpha (b.isEnabled() ? 0.5f : 0.25f));
+            g.drawRoundedRectangle (r, 14.f, on ? 1.5f : 1.f);
+            return;
+        }
         g.setColour (on ? pal::amber : juce::Colours::white.withAlpha (over || down ? 0.12f : 0.0f));
         g.fillRoundedRectangle (r, 4.f);
         g.setColour (on ? pal::amber : pal::line.withAlpha (b.isEnabled() ? 0.8f : 0.35f));
@@ -115,7 +156,8 @@ struct LookAndFeel : juce::LookAndFeel_V4
     {
         const bool on = b.getToggleState();
         g.setFont (getTextButtonFont (b, b.getHeight()));
-        g.setColour (on ? pal::amberInk : (b.isEnabled() ? pal::text : pal::textDim.withAlpha (0.6f)));
+        if (onMint (b)) g.setColour (on ? juce::Colour (0xff2f1b06) : pal::mintInk);
+        else g.setColour (on ? pal::amberInk : (b.isEnabled() ? pal::text : pal::textDim.withAlpha (0.6f)));
         g.drawText (b.getButtonText(), b.getLocalBounds().reduced (4, 0), juce::Justification::centred, true);
     }
 };
@@ -359,34 +401,104 @@ inline void drawChip (juce::Graphics& g, juce::Rectangle<int> r, const juce::Str
     drawText (g, t, r.reduced (8, 0), sans (11.f, true), pal::text, juce::Justification::centred);
 }
 
-// Wood and brass backdrop shared by the pages.
+// The painted case: rounded top, seafoam enamel, a brass hairline inside the edge and a few chips.  Drawn once by the editor behind everything.
+inline void addTopRoundedRect (juce::Path& p, float x, float y, float w, float h, float rt, float rb)
+{
+    const float pi = juce::MathConstants<float>::pi, hp = pi * 0.5f;
+    p.startNewSubPath (x + rt, y);
+    p.lineTo (x + w - rt, y);
+    p.addCentredArc (x + w - rt, y + rt, rt, rt, 0.f, 0.f, hp);
+    p.lineTo (x + w, y + h - rb);
+    p.addCentredArc (x + w - rb, y + h - rb, rb, rb, 0.f, hp, pi);
+    p.lineTo (x + rb, y + h);
+    p.addCentredArc (x + rb, y + h - rb, rb, rb, 0.f, pi, pi + hp);
+    p.lineTo (x, y + rt);
+    p.addCentredArc (x + rt, y + rt, rt, rt, 0.f, pi + hp, 2.f * pi);
+    p.closeSubPath();
+}
+
+inline void paintCabinet (juce::Graphics& g)
+{
+    // the table the radio stands on
+    g.setGradientFill (juce::ColourGradient (juce::Colour (0xff6a3720), 0, 0, juce::Colour (0xff40200f), 0, 900.f, false));
+    g.fillAll();
+    g.setColour (juce::Colour (0x1a000000));
+    for (int x = 0; x < 1280; x += 11) g.fillRect (x, 0, 2, 900);
+
+    const juce::Rectangle<float> body (14.f, 8.f, 1252.f, 884.f);
+    g.setColour (juce::Colour (0x73140803));
+    g.fillRoundedRectangle (body.translated (0.f, 10.f).expanded (4.f), 56.f);
+    juce::Path shape;
+    addTopRoundedRect (shape, body.getX(), body.getY(), body.getWidth(), body.getHeight(), 52.f, 10.f);
+    juce::ColourGradient paint (pal::mint.brighter (0.12f), 0.f, body.getY(), pal::mint.darker (0.12f), 0.f, body.getBottom(), false);
+    g.setGradientFill (paint);
+    g.fillPath (shape);
+    g.setGradientFill (juce::ColourGradient (juce::Colour (0x1f000000), body.getX(), 0.f, juce::Colour (0x00000000), body.getX() + 100.f, 0.f, false));
+    g.fillPath (shape);
+    g.setGradientFill (juce::ColourGradient (juce::Colour (0x00000000), body.getRight() - 100.f, 0.f, juce::Colour (0x24000000), body.getRight(), 0.f, false));
+    g.fillPath (shape);
+    g.setColour (juce::Colour (0xff3d5a4e)); g.strokePath (shape, juce::PathStrokeType (1.f));
+    g.setColour (juce::Colour (0x80ffffff)); g.drawLine (body.getX() + 40.f, body.getY() + 1.5f, body.getRight() - 40.f, body.getY() + 1.5f, 1.5f);
+    // paint chips
+    g.setColour (juce::Colour (0x806e8279));
+    const int chips[][4] = { { 1190, 300, 4, 8 }, { 70, 520, 4, 9 }, { 1190, 780, 5, 7 }, { 30, 860, 9, 5 }, { 640, 872, 10, 4 } };
+    for (auto& c : chips) g.fillRoundedRectangle ((float) c[0], (float) c[1], (float) c[2], (float) c[3], 1.5f);
+    // brass hairline inset from the edge
+    juce::Path inset;
+    addTopRoundedRect (inset, body.getX() + 9.f, body.getY() + 9.f, body.getWidth() - 18.f, body.getHeight() - 18.f, 26.f, 6.f);
+    g.setColour (juce::Colour (0x591e3c30)); g.strokePath (inset, juce::PathStrokeType (1.f));
+}
+
+// Grille cloth, a brass rim, and the brass-framed control strip, shared by the pages.  Page coordinates start 52 px down.
+inline juce::Image& clothTile()
+{
+    static juce::Image t = []
+    {
+        juce::Image i (juce::Image::ARGB, 3, 3, true);
+        juce::Graphics g (i);
+        g.fillAll (juce::Colour (0xff47301f));
+        g.setColour (juce::Colour (0x24ffcd96)); g.fillRect (0, 0, 3, 1);
+        g.setColour (juce::Colour (0x47000000)); g.fillRect (0, 0, 1, 3);
+        return i;
+    }();
+    return t;
+}
+inline juce::Image& latticeTile()
+{
+    static juce::Image t = []
+    {
+        juce::Image i (juce::Image::ARGB, 9, 9, true);
+        juce::Graphics g (i);
+        g.fillAll (juce::Colour (0xff1a0f0a));
+        g.setColour (juce::Colour (0x28c9a24e));
+        g.drawLine (0.f, 9.f, 9.f, 0.f, 1.f); g.drawLine (0.f, 0.f, 9.f, 9.f, 1.f);
+        return i;
+    }();
+    return t;
+}
+// The control strip: brass frame, faint lattice, then the dark panel.
+inline void paintStrip (juce::Graphics& g, juce::Rectangle<float> strip)
+{
+    g.setColour (pal::brassDeep);  g.fillRoundedRectangle (strip.expanded (4.f), 7.f);
+    g.setColour (pal::brassHi);    g.fillRoundedRectangle (strip.expanded (3.f), 6.f);
+    g.setTiledImageFill (latticeTile(), 0, 0, 1.f);
+    g.fillRoundedRectangle (strip, 4.f);
+    g.setColour (pal::panel);
+    g.fillRoundedRectangle (strip, 4.f);
+    g.setColour (juce::Colour (0x2effebbe));
+    g.drawRoundedRectangle (strip.reduced (0.5f), 4.f, 1.f);
+}
+
 inline void paintDrawerFrame (juce::Graphics& g, bool tallFrontBoard)
 {
-    const juce::Rectangle<float> body (14.f, 4.f, 1252.f, 836.f);
-    g.setGradientFill (juce::ColourGradient (pal::wood.brighter (0.1f), 0, body.getY(), pal::wood.darker (0.35f), 0, body.getBottom(), false));
-    g.fillRoundedRectangle (body, 6.f);
-    g.setColour (juce::Colour (0xff2e1a0c));
-    g.drawRoundedRectangle (body, 6.f, 1.f);
-
-    const juce::Rectangle<float> cav (30.f, 108.f, 1220.f, 716.f);
-    g.setGradientFill (juce::ColourGradient (juce::Colour (0xff5a3e26), 0, cav.getY(), juce::Colour (0xff3a2615), 0, cav.getBottom(), false));
-    g.fillRect (cav);
-    g.setGradientFill (juce::ColourGradient (juce::Colour (0xa6000000), 0, cav.getY(), juce::Colour (0x00000000), 0, cav.getY() + 18.f, false));
-    g.fillRect (cav.withHeight (18.f));
-    g.setColour (juce::Colour (0xff2e1a0c));
-    g.drawRect (cav, 1.f);
-
-    juce::Rectangle<float> board (14.f, 4.f, 1252.f, 104.f);
-    g.setGradientFill (juce::ColourGradient (pal::woodLight.brighter (0.15f), 0, board.getY(), pal::woodLight.darker (0.25f), 0, board.getBottom(), false));
-    g.fillRoundedRectangle (board, 6.f);
-    g.setColour (juce::Colour (0xff6c4d2d));
-    g.fillRect (board.removeFromBottom (14.f));
-    const float screws[][2] = { { 22.f, 12.f }, { 1244.f, 12.f }, { 22.f, 92.f }, { 1244.f, 92.f } };
-    for (auto& sp : screws)
-    {
-        g.setGradientFill (juce::ColourGradient (juce::Colour (0xfff6df9a), sp[0] - 2.f, sp[1] - 2.f, juce::Colour (0xff8a6528), sp[0] + 4.f, sp[1] + 4.f, true));
-        g.fillEllipse (sp[0] - 4.5f, sp[1] - 4.5f, 9.f, 9.f);
-    }
     juce::ignoreUnused (tallFrontBoard);
+    const juce::Rectangle<float> cav (30.f, 108.f, 1220.f, 716.f);
+    g.setColour (pal::brassDeep);  g.fillRoundedRectangle (cav.expanded (6.f), 20.f);
+    g.setGradientFill (juce::ColourGradient (pal::brassHi.brighter (0.2f), cav.getX(), cav.getY(), pal::brassHi.darker (0.3f), cav.getRight(), cav.getBottom(), false));
+    g.fillRoundedRectangle (cav.expanded (5.f), 19.f);
+    g.setTiledImageFill (clothTile(), 0, 0, 1.f);
+    g.fillRoundedRectangle (cav, 16.f);
+    g.setGradientFill (juce::ColourGradient (juce::Colour (0xa6000000), cav.getX(), cav.getY(), juce::Colour (0x00000000), cav.getX(), cav.getY() + 18.f, false));
+    g.fillRoundedRectangle (cav.withHeight (18.f), 16.f);
 }
 } // namespace ui

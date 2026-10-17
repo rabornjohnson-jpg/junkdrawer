@@ -22,8 +22,8 @@ juce_add_plugin(JunkDrawer
     PLUGIN_MANUFACTURER_CODE Frfa
     PLUGIN_CODE             Jdw1
     FORMATS                 VST3 Standalone
-    BUNDLE_ID               com.fadingfractalaudio.junkdrawer
-    PRODUCT_NAME            "Junk Drawer"
+    BUNDLE_ID               com.fadingfractalaudio.rotarydial
+    PRODUCT_NAME            "Rotary Dial"
     IS_SYNTH                FALSE
     NEEDS_MIDI_INPUT        FALSE
     NEEDS_MIDI_OUTPUT       FALSE

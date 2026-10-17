@@ -718,7 +718,7 @@ void JunkDrawerProcessor::shake (int track) { rollSteps (track, state.getRawPara
 // Catch something
 juce::File JunkDrawerProcessor::recordingsFolder()
 {
-    return juce::File::getSpecialLocation (juce::File::userApplicationDataDirectory).getChildFile ("Fading Fractal Audio").getChildFile ("Junk Drawer").getChildFile ("Recordings");
+    return juce::File::getSpecialLocation (juce::File::userApplicationDataDirectory).getChildFile ("Fading Fractal Audio").getChildFile ("Rotary Dial").getChildFile ("Recordings");
 }
 
 bool JunkDrawerProcessor::startCatch (int track, int input, int start, int lengthBars)

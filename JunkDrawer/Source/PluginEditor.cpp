@@ -14,6 +14,30 @@ juce::Image& logoImage()
     return img;
 }
 
+// The mark darkened to ink so it reads on the seafoam body.
+juce::Image& logoInk()
+{
+    static juce::Image img = []
+    {
+        juce::Image src = logoImage().convertedToFormat (juce::Image::ARGB);
+        juce::Image out (juce::Image::ARGB, src.getWidth(), src.getHeight(), true);
+        for (int y = 0; y < src.getHeight(); ++y)
+            for (int x = 0; x < src.getWidth(); ++x)
+            {
+                const auto c = src.getPixelAt (x, y);
+                const float a = c.getFloatAlpha() * juce::jlimit (0.f, 1.f, c.getBrightness() * 1.1f);
+                out.setPixelAt (x, y, pal::mintInk.withAlpha (a));
+            }
+        return out;
+    }();
+    return img;
+}
+
+void drawInkLogo (juce::Graphics& g, juce::Rectangle<int> r)
+{
+    g.drawImage (logoInk(), r.toFloat(), juce::RectanglePlacement::centred);
+}
+
 void drawLogo (juce::Graphics& g, juce::Rectangle<int> r)
 {
     g.drawImage (logoImage(), r.toFloat(), juce::RectanglePlacement::centred);
@@ -137,13 +161,14 @@ struct JunkDrawerEditor::Header : juce::Component, juce::Timer, juce::ChangeList
     Header (JunkDrawerEditor& e) : ed (e)
     {
         ed.proc.addChangeListener (this);
-        const char* names[] = { "Drawer", "LFOs", "Master", "Matrix", "Song" };
-        const char* tips[]  = { "The main drawer", "The six LFOs", "Master and effects", "Everything that is hooked up", "Patterns and the chain" };
+        const char* names[] = { "Dial", "LFOs", "Master", "Matrix", "Song" };
+        const char* tips[]  = { "The main dial", "The six LFOs", "Master and effects", "Everything that is hooked up", "Patterns and the chain" };
         for (int i = 0; i < NumPages; ++i)
         {
             auto& b = tabs[(size_t) i];
             b.setButtonText (names[i]);
             b.setTooltip (tips[i]);
+            b.getProperties().set ("mint", true);
             b.setClickingTogglesState (true);
             b.setRadioGroupId (101);
             b.onClick = [this, i] { ed.showPage (i); };
@@ -151,6 +176,8 @@ struct JunkDrawerEditor::Header : juce::Component, juce::Timer, juce::ChangeList
         }
         tabs[0].setToggleState (true, juce::dontSendNotification);
         reduce.setButtonText ("Reduce motion");
+        reduce.getProperties().set ("mint", true);
+        exportBtn.getProperties().set ("mint", true);
         reduce.setClickingTogglesState (true);
         reduce.setToggleState ((bool) ed.proc.state.state.getProperty ("reduceMotion", false), juce::dontSendNotification);
         reduce.setTooltip ("Turns off the fading glow on the playing step");
@@ -169,10 +196,10 @@ struct JunkDrawerEditor::Header : juce::Component, juce::Timer, juce::ChangeList
 
     void resized() override
     {
-        int x = 312;
-        for (auto& b : tabs) { b.setBounds (x, 12, 62, 28); x += 66; }
-        reduce.setBounds (getWidth() - 24 - 110, 12, 110, 28);
-        exportBtn.setBounds (928, 12, 70, 28);
+        int x = 300;
+        for (auto& b : tabs) { b.setBounds (x, 16, 60, 28); x += 64; }
+        reduce.setBounds (getWidth() - 44 - 110, 16, 110, 28);
+        exportBtn.setBounds (898, 16, 68, 28);
     }
 
     void timerCallback() override
@@ -193,7 +220,7 @@ struct JunkDrawerEditor::Header : juce::Component, juce::Timer, juce::ChangeList
     }
     void mouseMove (const juce::MouseEvent& e) override { setMouseCursor (barArea().contains (e.getPosition()) ? juce::MouseCursor::PointingHandCursor : juce::MouseCursor::NormalCursor); }
 
-    juce::Rectangle<int> barArea() const { return { 648, 11, 268, 30 }; }
+    juce::Rectangle<int> barArea() const { return { 626, 15, 262, 30 }; }
 
     void openMenu()
     {
@@ -212,15 +239,15 @@ struct JunkDrawerEditor::Header : juce::Component, juce::Timer, juce::ChangeList
             m.addSubMenu ("Mine", mine);
         }
         m.addSeparator();
-        m.addItem (100000, "Save this drawer as...");
-        m.addItem (100003, "Export this drawer to a file...", ed.proc.currentDrawer() >= 0);
-        m.addItem (100004, "Import drawers from files...");
+        m.addItem (100000, "Save this station as...");
+        m.addItem (100003, "Export this station to a file...", ed.proc.currentDrawer() >= 0);
+        m.addItem (100004, "Import stations from files...");
         m.addSeparator();
         m.addItem (100005, "About and quick start...");
         if (ed.proc.currentDrawer() >= 100)
         {
-            m.addItem (100001, "Rename this drawer...");
-            m.addItem (100002, "Delete this drawer...");
+            m.addItem (100001, "Rename this station...");
+            m.addItem (100002, "Delete this station...");
         }
         m.showMenuAsync (juce::PopupMenu::Options().withTargetScreenArea (localAreaToGlobal (barArea())).withMinimumWidth (barArea().getWidth()),
                          [this, safe = juce::Component::SafePointer<Header> (this)] (int r)
@@ -241,7 +268,7 @@ struct JunkDrawerEditor::Header : juce::Component, juce::Timer, juce::ChangeList
         const int idx = ed.proc.currentDrawer();
         if (idx < 0) return;
         const auto start = juce::File::getSpecialLocation (juce::File::userDocumentsDirectory).getChildFile (jdp::safeName (ed.proc.drawer (idx).name) + ".drawer");
-        chooser = std::make_unique<juce::FileChooser> ("Export this drawer", start, "*.drawer");
+        chooser = std::make_unique<juce::FileChooser> ("Export this station", start, "*.drawer");
         chooser->launchAsync (juce::FileBrowserComponent::saveMode | juce::FileBrowserComponent::canSelectFiles | juce::FileBrowserComponent::warnAboutOverwriting,
                               [this, safe = juce::Component::SafePointer<Header> (this), idx] (const juce::FileChooser& fc)
         {
@@ -252,7 +279,7 @@ struct JunkDrawerEditor::Header : juce::Component, juce::Timer, juce::ChangeList
 
     void importFiles()
     {
-        chooser = std::make_unique<juce::FileChooser> ("Import drawers", juce::File::getSpecialLocation (juce::File::userDocumentsDirectory), "*.drawer");
+        chooser = std::make_unique<juce::FileChooser> ("Import stations", juce::File::getSpecialLocation (juce::File::userDocumentsDirectory), "*.drawer");
         chooser->launchAsync (juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectFiles | juce::FileBrowserComponent::canSelectMultipleItems,
                               [this, safe = juce::Component::SafePointer<Header> (this)] (const juce::FileChooser& fc)
         {
@@ -260,9 +287,9 @@ struct JunkDrawerEditor::Header : juce::Component, juce::Timer, juce::ChangeList
             const auto files = fc.getResults();
             if (files.isEmpty()) return;
             const int n = ed.proc.importDrawers (files);
-            juce::AlertWindow::showAsync (juce::MessageBoxOptions().withIconType (juce::MessageBoxIconType::NoIcon).withTitle ("Import drawers")
-                                              .withMessage (n == 0 ? "Nothing was added. Those files are not Junk Drawer drawers."
-                                                                   : juce::String (n) + (n == 1 ? " drawer was" : " drawers were") + " added under Mine.").withButton ("OK"), nullptr);
+            juce::AlertWindow::showAsync (juce::MessageBoxOptions().withIconType (juce::MessageBoxIconType::NoIcon).withTitle ("Import stations")
+                                              .withMessage (n == 0 ? "Nothing was added. Those files are not Rotary Dial stations."
+                                                                   : juce::String (n) + (n == 1 ? " station was" : " stations were") + " added under Mine.").withButton ("OK"), nullptr);
         });
     }
 
@@ -270,7 +297,7 @@ struct JunkDrawerEditor::Header : juce::Component, juce::Timer, juce::ChangeList
     {
         const int idx = ed.proc.currentDrawer();
         if (idx < 100) return;
-        juce::AlertWindow::showAsync (juce::MessageBoxOptions().withIconType (juce::MessageBoxIconType::NoIcon).withTitle ("Delete this drawer?")
+        juce::AlertWindow::showAsync (juce::MessageBoxOptions().withIconType (juce::MessageBoxIconType::NoIcon).withTitle ("Delete this station?")
                                           .withMessage ("\"" + ed.proc.drawer (idx).name + "\" will be removed from your saved drawers. Your current settings stay as they are.")
                                           .withButton ("Delete").withButton ("Keep it"),
                                       [this, safe = juce::Component::SafePointer<Header> (this), idx] (int r)
@@ -281,7 +308,7 @@ struct JunkDrawerEditor::Header : juce::Component, juce::Timer, juce::ChangeList
 
     void askName (bool rename)
     {
-        auto* w = new juce::AlertWindow (rename ? "Rename this drawer" : "Save this drawer", rename ? "Type the new name." : "Give it a name. It will show up under Mine.", juce::MessageBoxIconType::NoIcon);
+        auto* w = new juce::AlertWindow (rename ? "Rename this station" : "Save this station", rename ? "Type the new name." : "Give it a name. It will show up under Mine.", juce::MessageBoxIconType::NoIcon);
         w->addTextEditor ("name", rename ? ed.proc.drawer (ed.proc.currentDrawer()).name : juce::String(), "");
         w->addButton ("Save", 1, juce::KeyPress (juce::KeyPress::returnKey));
         w->addButton ("Cancel", 0, juce::KeyPress (juce::KeyPress::escapeKey));
@@ -297,24 +324,27 @@ struct JunkDrawerEditor::Header : juce::Component, juce::Timer, juce::ChangeList
         }), false);
     }
 
-    juce::Rectangle<int> bpmArea() const { return { getWidth() - 24 - 110 - 14 - 110, 12, 110, 28 }; }
+    juce::Rectangle<int> bpmArea() const { return { getWidth() - 44 - 110 - 12 - 130, 16, 130, 28 }; }
 
     void paint (juce::Graphics& g) override
     {
-        drawLogo (g, { 24, 11, 58, 29 });
-        drawText (g, "FADING FRACTAL AUDIO", { 94, 6, 220, 14 }, sans (11.f, true).withExtraKerningFactor (0.12f), juce::Colour (0xffd7c196));
-        drawText (g, "Junk Drawer", { 94, 18, 220, 30 }, serif (25.f), juce::Colour (0xfff6e8c9));
+        drawInkLogo (g, { 44, 14, 58, 30 });
+        drawText (g, "FADING FRACTAL AUDIO", { 112, 13, 180, 13 }, sans (11.f, true).withExtraKerningFactor (0.1f), pal::mintInk.withAlpha (0.8f));
+        drawText (g, "Rotary Dial", { 112, 25, 180, 26 }, serif (23.f), pal::mintInk);
 
-        const juce::Rectangle<float> bar (648.f, 11.f, 268.f, 30.f);
-        g.setColour (juce::Colour (0x52000000));
+        // The preset window: a slide-rule strip with the station number, like a radio's tuning scale.
+        const juce::Rectangle<float> bar (626.f, 15.f, 262.f, 30.f);
+        g.setColour (pal::brassDeep);
+        g.fillRoundedRectangle (bar.expanded (2.f), 17.f);
+        g.setColour (juce::Colour (0xff2a1a0a));
         g.fillRoundedRectangle (bar, 15.f);
-        g.setColour (juce::Colour (0x80d6ac5c));
+        g.setColour (juce::Colour (0xffe9b872).withAlpha (0.5f));
         g.drawRoundedRectangle (bar.reduced (0.5f), 15.f, 1.f);
-        drawText (g, juce::String::charToString (0x2039), bar.toNearestInt().removeFromLeft (30), sans (16.f), pal::amber.withAlpha (0.4f), juce::Justification::centred);
-        drawText (g, juce::String::charToString (0x203a), bar.toNearestInt().removeFromRight (30), sans (16.f), pal::amber.withAlpha (0.4f), juce::Justification::centred);
+        drawText (g, juce::String::charToString (0x2039), bar.toNearestInt().removeFromLeft (30), sans (16.f), juce::Colour (0xffe9b872).withAlpha (0.6f), juce::Justification::centred);
+        drawText (g, juce::String::charToString (0x203a), bar.toNearestInt().removeFromRight (30), sans (16.f), juce::Colour (0xffe9b872).withAlpha (0.6f), juce::Justification::centred);
         const int cur = ed.proc.currentDrawer();
-        const auto label = cur < 0 ? juce::String ("Pick a drawer") : juce::String (cur + 1).paddedLeft ('0', 3) + " " + juce::String::charToString (0x00b7) + " " + ed.proc.drawer (cur).name;
-        drawText (g, label, bar.toNearestInt().reduced (32, 0), serif (15.f, false), cur < 0 ? pal::textDim : pal::text, juce::Justification::centred);
+        const auto label = cur < 0 ? juce::String ("Pick a station") : juce::String (cur + 1).paddedLeft ('0', 3) + " " + juce::String::charToString (0x00b7) + " " + ed.proc.drawer (cur).name;
+        drawText (g, label, bar.toNearestInt().reduced (32, 0), serif (15.f, false), cur < 0 ? juce::Colour (0xffb09a72) : juce::Colour (0xfff6e8c9), juce::Justification::centred);
 
         if (ed.proc.armedLfo() >= 0)
         {
@@ -323,7 +353,7 @@ struct JunkDrawerEditor::Header : juce::Component, juce::Timer, juce::ChangeList
             drawText (g, "Assigning L" + juce::String (ed.proc.armedLfo() + 1), pill, sans (12.f, true), pal::amberInk, juce::Justification::centred);
         }
         else
-            drawText (g, bpm > 0.0 ? juce::String (bpm, 1) + " BPM" : juce::String ("No host tempo"), bpmArea(), mono (12.f), pal::amber, juce::Justification::centredRight);
+            drawText (g, bpm > 0.0 ? juce::String (bpm, 1) + " BPM" : juce::String ("No host tempo"), bpmArea(), mono (12.f), pal::mintInk, juce::Justification::centredRight);
     }
 
     JunkDrawerEditor& ed;
@@ -599,10 +629,10 @@ struct StepGrid : juce::Component, juce::Timer, juce::SettableTooltipClient
 {
     explicit StepGrid (Proc& p) : proc (p)
     {
-        setTooltip ("Click a step to change it, drag across steps to paint, double-click to reset, right-click to clear a region step.");
+        setTooltip ("Click a step to change it, drag across steps to paint, double-click to reset, right-click to clear a region step. The volume bars underneath can be dragged too.");
     }
 
-    static constexpr int labelW = 64, stripW = 592, stripH = 70, overviewY = 80, overviewH = 22;
+    static constexpr int labelW = 64, stripW = 592, stripH = 70, overviewY = 80, overviewH = 62;
 
     void setTrack (int t) { track = t; sig = -1; repaint(); }
     void setLane (int l) { lane = l; sig = -1; repaint(); }
@@ -677,6 +707,7 @@ struct StepGrid : juce::Component, juce::Timer, juce::SettableTooltipClient
         const int vlen = proc.laneLength (track, jd::LaneVolume), vcur = currentIndex (jd::LaneVolume);
         g.setColour (juce::Colour (0x66402a14));
         g.fillRect ((float) labelW, (float) overviewY + overviewH - 1.f, (float) stripW, 1.f);
+        for (int q = 1; q < 4; ++q) g.fillRect ((float) labelW, (float) overviewY + (float) (overviewH - 1) * (float) q / 4.f, (float) stripW, 1.f);
         for (int i = 0; i < jd::kSteps; ++i)
         {
             const float v = plainValue (proc, jd::stepId (track, i, jd::LaneVolume));
@@ -755,16 +786,26 @@ struct StepGrid : juce::Component, juce::Timer, juce::SettableTooltipClient
         return -1;
     }
 
-    void setStep (int i, float plain)
+    void setStep (int i, float plain, int ln = -1)
     {
-        auto* p = proc.state.getParameter (jd::stepId (track, i, lane));
+        auto* p = proc.state.getParameter (jd::stepId (track, i, ln < 0 ? lane : ln));
         p->beginChangeGesture();
         p->setValueNotifyingHost (p->convertTo0to1 (plain));
         p->endChangeGesture();
     }
 
+    // The volume bars underneath can be dragged too, whichever lane is showing above.
+    void editVolume (const juce::MouseEvent& e)
+    {
+        const int i = cellAt (e.x);
+        if (i < 0 || i >= proc.laneLength (track, jd::LaneVolume)) return;
+        setStep (i, juce::jlimit (0.f, 1.f, ((float) (overviewY + overviewH - 1) - (float) e.y) / (float) (overviewH - 3)), jd::LaneVolume);
+    }
+
     void editAt (const juce::MouseEvent& e, bool first)
     {
+        if (first) volumeDrag = e.y > stripH + 4;
+        if (volumeDrag) { editVolume (e); return; }
         const int i = cellAt (e.x);
         if (i < 0 || i >= proc.laneLength (track, lane) || e.y > stripH) return;
         const float cur = plainValue (proc, jd::stepId (track, i, lane));
@@ -795,10 +836,13 @@ struct StepGrid : juce::Component, juce::Timer, juce::SettableTooltipClient
     void mouseDoubleClick (const juce::MouseEvent& e) override
     {
         const int i = cellAt (e.x);
-        if (i >= 0 && e.y <= stripH) setStep (i, defaultFor (lane));
+        if (i < 0) return;
+        if (e.y <= stripH) setStep (i, defaultFor (lane));
+        else if (e.y > stripH + 4 && i < proc.laneLength (track, jd::LaneVolume)) setStep (i, 1.f, jd::LaneVolume);
     }
 
     Proc& proc;
+    bool volumeDrag = false;
     int track = 0, lane = 0;
     juce::int64 sig = -1;
 };
@@ -1193,6 +1237,8 @@ struct Liner : juce::Component, juce::FileDragAndDropTarget
         keyBtn.setButtonText (keyButtonText());
         matchBtn.setEnabled (loaded && proc.trackKey (track).found);
         wave.setVisible (loaded && ! recOpen);
+        for (auto* c : std::initializer_list<juce::Component*> { &grid, &less, &more, &tabs[0], &tabs[1], &tabs[2], &tabs[3], &tabs[4], &tabs[5], &tabs[6], &tabs[7], &tabs[8], &laneBtn })
+            c->setVisible (loaded && ! recOpen);
         rec.setVisible (recOpen);
         record.setToggleState (recOpen, juce::dontSendNotification);
         record.setEnabled (proc.catchState() == Proc::CatchIdle);
@@ -1213,15 +1259,15 @@ struct Liner : juce::Component, juce::FileDragAndDropTarget
         matchAllBtn.setBounds (402, 6, 62, 24);
         matchBtn.setBounds (292, 32, 58, 22);
         if (tuneKnob != nullptr) tuneKnob->setBounds (356, 30, 30, 26);
-        wave.setBounds (16, 56, 656, 204);
+        wave.setBounds (16, 56, 656, 164);
         rec.setBounds (16, 56, 656, 204);
         int x = 16;
         const int w[] = { 52, 52, 44, 52, 58, 50, 50, 50, 36 };
-        for (int i = 0; i < jd::kLanes; ++i) { tabs[(size_t) i].setBounds (x, 268, w[i], 24); x += w[i] + 5; }
-        less.setBounds (552, 268, 24, 24);
-        more.setBounds (610, 268, 24, 24);
-        grid.setBounds (16, 300, 656, 102);
-        laneBtn.setBounds (16, 300 + 44, 52, 22);
+        for (int i = 0; i < jd::kLanes; ++i) { tabs[(size_t) i].setBounds (x, 228, w[i], 24); x += w[i] + 5; }
+        less.setBounds (552, 228, 24, 24);
+        more.setBounds (610, 228, 24, 24);
+        grid.setBounds (16, 262, 656, 146);
+        laneBtn.setBounds (16, 262 + 44, 52, 22);
         if (tag != nullptr) tag->setBounds (getWidth() - 216 - 12, 10, 216, 406);
     }
 
@@ -1254,13 +1300,13 @@ struct Liner : juce::Component, juce::FileDragAndDropTarget
             const float tune = plainValue (proc, jd::trackId (track, "tune"));
             drawText (g, "Tune", { 392, 31, 72, 12 }, sans (11.f, true), ink.withAlpha (0.85f));
             drawText (g, (tune > 0.05f ? "+" : "") + juce::String (tune, 1) + " st", { 392, 42, 72, 12 }, mono (11.f), ink);
-            drawText (g, "Steps", { 512, 268, 38, 24 }, sans (11.f, true), ink.withAlpha (0.85f), juce::Justification::centredRight);
-            drawText (g, juce::String (proc.laneLength (track, grid.laneIndex())), { 578, 268, 30, 24 }, mono (13.f, true), ink, juce::Justification::centred);
+            drawText (g, "Steps", { 512, 228, 38, 24 }, sans (11.f, true), ink.withAlpha (0.85f), juce::Justification::centredRight);
+            drawText (g, juce::String (proc.laneLength (track, grid.laneIndex())), { 578, 228, 30, 24 }, mono (13.f, true), ink, juce::Justification::centred);
             const int feel = juce::jlimit (0, 2, juce::roundToInt (plainValue (proc, "seq_feel")));
-            drawText (g, jd::kStepDivs[juce::jlimit (0, 3, juce::roundToInt (plainValue (proc, "seq_div")))] + (feel == 1 ? "d" : feel == 2 ? "t" : ""), { 636, 268, 36, 24 }, mono (11.f), ink.withAlpha (0.8f), juce::Justification::centredRight);
+            drawText (g, jd::kStepDivs[juce::jlimit (0, 3, juce::roundToInt (plainValue (proc, "seq_div")))] + (feel == 1 ? "d" : feel == 2 ? "t" : ""), { 636, 228, 36, 24 }, mono (11.f), ink.withAlpha (0.8f), juce::Justification::centredRight);
         }
         if (message.isNotEmpty())
-            drawText (g, message, { 16, td == nullptr ? 350 : 404, 656, 18 }, sans (12.f), juce::Colour (0xff7a2e16), td == nullptr ? juce::Justification::centred : juce::Justification::centredLeft);
+            drawText (g, message, { 16, td == nullptr ? 350 : 409, 656, 16 }, sans (12.f), juce::Colour (0xff7a2e16), td == nullptr ? juce::Justification::centred : juce::Justification::centredLeft);
     }
 
     bool isInterestedInFileDrag (const juce::StringArray& files) override { return files.size() > 0 && isSupported (juce::File (files[0])); }
@@ -1298,6 +1344,69 @@ struct Liner : juce::Component, juce::FileDragAndDropTarget
     std::unique_ptr<juce::FileChooser> chooser;
 };
 
+// The tuning dial: the needle shows the current station on a 1-100 scale. Drag or scroll to change station.
+struct TuneDial : juce::Component, juce::SettableTooltipClient, juce::ChangeListener
+{
+    explicit TuneDial (Proc& p) : proc (p)
+    {
+        setTooltip ("Tuning dial. Drag it, or scroll over it, to move between stations.");
+        setMouseCursor (juce::MouseCursor::UpDownResizeCursor);
+        proc.addChangeListener (this);
+    }
+    ~TuneDial() override { proc.removeChangeListener (this); }
+    void changeListenerCallback (juce::ChangeBroadcaster*) override { repaint(); }
+
+    void mouseDown (const juce::MouseEvent&) override { startIdx = juce::jmax (0, proc.currentDrawer()); lastIdx = proc.currentDrawer(); }
+    void mouseDrag (const juce::MouseEvent& e) override
+    {
+        const int n = proc.drawerCount();
+        const int idx = juce::jlimit (0, n - 1, startIdx + juce::roundToInt ((float) (e.getDistanceFromDragStartX() - e.getDistanceFromDragStartY()) / 4.f));
+        if (idx != lastIdx) { lastIdx = idx; proc.loadDrawer (idx); }
+    }
+    void mouseWheelMove (const juce::MouseEvent&, const juce::MouseWheelDetails& w) override
+    {
+        wheel += w.deltaY * (w.isReversed ? -1.f : 1.f) * 8.f;
+        const int steps = (int) wheel;
+        if (steps != 0) { wheel -= (float) steps; proc.stepDrawer (steps > 0 ? 1 : -1); }
+    }
+
+    void paint (juce::Graphics& g) override
+    {
+        const auto b = getLocalBounds().toFloat();
+        const auto c = b.getCentre();
+        const float R = juce::jmin (b.getWidth(), b.getHeight()) * 0.5f - 3.f;
+        // brass bezel, cream face
+        g.setColour (juce::Colour (0x59000000)); g.fillEllipse (c.x - R + 1.f, c.y - R + 3.f, 2.f * R - 2.f, 2.f * R - 3.f);
+        g.setGradientFill (juce::ColourGradient (pal::brassHi, c.x - R, c.y - R, pal::brassDeep, c.x + R, c.y + R, false));
+        g.fillEllipse (c.x - R, c.y - R, 2.f * R, 2.f * R);
+        const float f = R - 5.f;
+        g.setColour (juce::Colour (0xfff3ead0)); g.fillEllipse (c.x - f, c.y - f, 2.f * f, 2.f * f);
+        g.setColour (juce::Colour (0xff5a4329).withAlpha (0.6f)); g.drawEllipse (c.x - f, c.y - f, 2.f * f, 2.f * f, 1.f);
+
+        const float pi = juce::MathConstants<float>::pi, a0 = -0.75f * pi, a1 = 0.75f * pi;
+        auto pt = [&] (float a, float r) { return juce::Point<float> (c.x + std::sin (a) * r, c.y - std::cos (a) * r); };
+        for (int i = 0; i <= 20; ++i)
+        {
+            const float a = a0 + (a1 - a0) * (float) i / 20.f;
+            const bool big = i % 5 == 0;
+            g.setColour (juce::Colour (0xff5a4329));
+            g.drawLine ({ pt (a, f - 3.f), pt (a, f - (big ? 11.f : 7.f)) }, big ? 1.6f : 1.f);
+        }
+        const int cur = proc.currentDrawer();
+        const float t = cur < 0 ? 0.f : (float) juce::jmin (cur, 99) / 99.f;
+        const float a = a0 + (a1 - a0) * t;
+        juce::Path needle;
+        needle.addTriangle (pt (a, f - 8.f), pt (a + 1.5707963f, 2.6f), pt (a - 1.5707963f, 2.6f));
+        g.setColour (juce::Colour (0xffa63a1e)); g.fillPath (needle);
+        g.setColour (pal::brassDeep); g.fillEllipse (c.x - 6.f, c.y - 6.f, 12.f, 12.f);
+        g.setColour (pal::brassHi); g.fillEllipse (c.x - 4.f, c.y - 4.f, 8.f, 8.f);
+    }
+
+    Proc& proc;
+    int startIdx = 0, lastIdx = -1;
+    float wheel = 0.f;
+};
+
 // The junk compartment: the pattern card, the regions card and the brass nameplate.
 struct Junk : juce::Component
 {
@@ -1315,8 +1424,8 @@ struct Junk : juce::Component
         run.setTooltip ("Runs the pattern without a host. In a DAW the host's play button drives it.");
         runAtt = std::make_unique<juce::ButtonParameterAttachment> (*s.getParameter ("seq_run"), run, nullptr);
         snap = std::make_unique<Seg> (s, "snap", juce::StringArray { "Off", "Hit", "Zero" });
-        rummage.setButtonText ("Rummage"); rummage.setTooltip ("Rummage through the drawer: re-roll every step on this track, except the lanes you keep");
-        shakeBtn.setButtonText ("Shake");  shakeBtn.setTooltip ("Shake the drawer: re-roll only some of the steps. The Amount knob sets how many.");
+        rummage.setButtonText ("Scan"); rummage.setTooltip ("Scan the dial: re-roll every step on this track, except the lanes you keep");
+        shakeBtn.setButtonText ("Shake");  shakeBtn.setTooltip ("Shake the dial: re-roll only some of the steps. The Amount knob sets how many.");
         rummage.onClick = [this] { proc.rummage (track); };
         shakeBtn.onClick = [this] { proc.shake (track); };
         shakeAmt = std::make_unique<Knob> (s, "shake_amt", "Amount", 38, juce::Colour (0xff2a1b10), juce::Colour (0xff5a4329));
@@ -1324,7 +1433,7 @@ struct Junk : juce::Component
         for (int i = 0; i < jd::kRolled; ++i)
         {
             keep[(size_t) i].setButtonText (lockNames[i]); keep[(size_t) i].setClickingTogglesState (true);
-            keep[(size_t) i].setTooltip ("Lit lanes are kept as they are when you Rummage or Shake");
+            keep[(size_t) i].setTooltip ("Lit lanes are kept as they are when you Scan or Shake");
             keepAtt[(size_t) i] = std::make_unique<juce::ButtonParameterAttachment> (*s.getParameter (juce::String ("lock_") + jd::laneKey (i)), keep[(size_t) i], nullptr);
             addAndMakeVisible (keep[(size_t) i]);
         }
@@ -1344,6 +1453,8 @@ struct Junk : juce::Component
         play.onClick = [this] { proc.auditionWhole (track); };
         stop.onClick = [this] { proc.stopAudition (track); };
         for (auto* c : std::initializer_list<juce::Component*> { div.get(), feel.get(), swing.get(), tempo.get(), &run, snap.get(), &sliceEq, &sliceHit, &add, &sub, &play, &stop }) addAndMakeVisible (*c);
+        dial = std::make_unique<TuneDial> (proc);
+        addAndMakeVisible (*dial);
         setTrack (0);
     }
 
@@ -1388,8 +1499,9 @@ struct Junk : juce::Component
         sub.setBounds (rx + 94, 14 + 66, 88, 26);
         snap->setBounds (rx + 16, 14 + 116, 150, 26);
         if (morphKnob != nullptr) morphKnob->setBounds (rx + 54, 14 + 148, 30, 26);
-        if (sendDelKnob != nullptr) sendDelKnob->setBounds (680 + 10, 124 + 30, 86, 76);
-        if (sendRevKnob != nullptr) sendRevKnob->setBounds (680 + 116, 124 + 30, 86, 76);
+        dial->setBounds (680 + 58, 14 + 30, 96, 96);
+        if (sendDelKnob != nullptr) sendDelKnob->setBounds (680 + 10, 14 + 144, 86, 76);
+        if (sendRevKnob != nullptr) sendRevKnob->setBounds (680 + 116, 14 + 144, 86, 76);
         play.setBounds (rx, 14 + 184, 88, 26);
         stop.setBounds (rx + 94, 14 + 184, 88, 26);
     }
@@ -1407,28 +1519,16 @@ struct Junk : juce::Component
         g.fillRect (getLocalBounds());
         card (g, { 14.f, 14.f, 212.f, 222.f }, "PATTERN");
         card (g, { 236.f, 14.f, 212.f, 222.f }, "REGIONS");
-        card (g, { 458.f, 14.f, 212.f, 222.f }, "RUMMAGE");
+        card (g, { 458.f, 14.f, 212.f, 222.f }, "SCAN");
         drawText (g, "Keep these lanes", { 458 + 16, 14 + 148, 182, 16 }, sans (11.f, true), juce::Colour (0xff5a4329));
         drawText (g, "Morph", { 236 + 16, 14 + 150, 50, 22 }, sans (11.f, true), juce::Colour (0xff5a4329));
         drawText (g, juce::String (juce::roundToInt (plainValue (proc, jd::trackId (track, "morph")) * 100.f)) + "%", { 236 + 16 + 98, 14 + 150, 60, 22 }, mono (11.f), juce::Colour (0xff5a4329));
         padBehind (g, { &rummage, &shakeBtn, &keep[0], &keep[1], &keep[2], &keep[3], &keep[4], &keep[5], div.get(), feel.get(), &run, snap.get(), &sliceEq, &sliceHit, &add, &sub, &play, &stop });
         drawText (g, "Snap edges to", { 236 + 16, 14 + 96, 182, 18 }, sans (11.f, true), juce::Colour (0xff5a4329));
 
-        // the brass nameplate, a little smaller to make room for the sends beneath it
-        const juce::Rectangle<float> plate (680.f, 14.f, 212.f, 100.f);
-        g.setColour (juce::Colour (0x66000000)); g.fillRoundedRectangle (plate.translated (0.f, 4.f), 3.f);
-        g.setGradientFill (juce::ColourGradient (juce::Colour (0xffe6cd84), plate.getX(), plate.getY(), juce::Colour (0xff8a6728), plate.getRight(), plate.getBottom(), false));
-        g.fillRoundedRectangle (plate, 3.f);
-        g.setColour (juce::Colour (0xff4a3413)); g.drawRoundedRectangle (plate.reduced (0.5f), 3.f, 1.f);
-        g.setColour (juce::Colour (0x59ffe9a8)); g.drawRoundedRectangle (plate.reduced (3.f), 2.f, 1.f);
-        const auto ink2 = juce::Colour (0xff3a2606);
-        g.setOpacity (0.85f);
-        drawLogo (g, { 680 + 64, 20, 84, 34 });
-        drawText (g, "FADING FRACTAL AUDIO", { 680 + 8, 56, 196, 13 }, sans (10.f, true).withExtraKerningFactor (0.1f), ink2, juce::Justification::centred);
-        drawText (g, "Junk Drawer", { 680 + 8, 67, 196, 28 }, serif (23.f), ink2, juce::Justification::centred);
-        g.setOpacity (1.f);
+        card (g, { 680.f, 14.f, 212.f, 222.f }, "STATION");
+        drawText (g, "SENDS", { 680 + 16, 14 + 130, 100, 14 }, sans (11.f, true).withExtraKerningFactor (0.16f), juce::Colour (0xff5a4329));
 
-        card (g, { 680.f, 124.f, 212.f, 112.f }, "SENDS");
     }
 
     Proc& proc;
@@ -1436,6 +1536,7 @@ struct Junk : juce::Component
     std::unique_ptr<Seg> div, feel, snap;
     std::unique_ptr<Knob> swing, tempo, shakeAmt, morphKnob, sendDelKnob, sendRevKnob;
     std::unique_ptr<Watch> wMorph;
+    std::unique_ptr<TuneDial> dial;
     juce::TextButton rummage, shakeBtn;
     std::array<juce::TextButton, jd::kRolled> keep;
     std::array<std::unique_ptr<juce::ButtonParameterAttachment>, jd::kRolled> keepAtt;
@@ -1609,11 +1710,7 @@ struct JunkDrawerEditor::DrawerPage : juce::Component, juce::ChangeListener
     void paint (juce::Graphics& g) override
     {
         paintDrawerFrame (g, true);
-        auto strip = juce::Rectangle<float> (44.f, 10.f, 1192.f, 90.f);
-        g.setColour (pal::panel);
-        g.fillRoundedRectangle (strip, 4.f);
-        g.setColour (juce::Colour (0x2effebbe));
-        g.drawRoundedRectangle (strip.reduced (0.5f), 4.f, 1.f);
+        paintStrip (g, { 44.f, 10.f, 1192.f, 90.f });
 
         drawStripLabel (g, "OUTPUT", 62, 16);
         g.setColour (pal::line); g.fillRect (150, 22, 1, 62);
@@ -1727,11 +1824,7 @@ struct JunkDrawerEditor::LfoPage : juce::Component, juce::ChangeListener
     void paint (juce::Graphics& g) override
     {
         paintDrawerFrame (g, false);
-        const juce::Rectangle<float> strip (44.f, 12.f, 1192.f, 80.f);
-        g.setColour (pal::panel);
-        g.fillRoundedRectangle (strip, 4.f);
-        g.setColour (juce::Colour (0x2effebbe));
-        g.drawRoundedRectangle (strip.reduced (0.5f), 4.f, 1.f);
+        paintStrip (g, { 44.f, 12.f, 1192.f, 80.f });
         drawStripLabel (g, "ASSIGN", 66, 26);
         g.setColour (pal::line); g.fillRect (390, 24, 1, 56);
         g.setColour (pal::textSoft);
@@ -1987,12 +2080,8 @@ struct JunkDrawerEditor::MasterPage : juce::Component
     void paint (juce::Graphics& g) override
     {
         paintDrawerFrame (g, false);
-        const juce::Rectangle<float> strip (44.f, 12.f, 1192.f, 80.f);
-        g.setColour (pal::panel);
-        g.fillRoundedRectangle (strip, 4.f);
-        g.setColour (juce::Colour (0x2effebbe));
-        g.drawRoundedRectangle (strip.reduced (0.5f), 4.f, 1.f);
-        drawStripLabel (g, "THE BACK OF THE DRAWER", 66, 24);
+        paintStrip (g, { 44.f, 12.f, 1192.f, 80.f });
+        drawStripLabel (g, "THE BACK OF THE SET", 66, 24);
         drawText (g, "Master and effects", { 66, 40, 320, 32 }, serif (22.f), juce::Colour (0xfff6e8c9));
         g.setColour (pal::line); g.fillRect (390, 24, 1, 56);
         g.setColour (pal::textSoft);
@@ -2073,8 +2162,7 @@ struct JunkDrawerEditor::SongPage : juce::Component, juce::ChangeListener, juce:
             g.setColour (pal::panel); g.fillRoundedRectangle (r, 4.f);
             g.setColour (juce::Colour (0x29ffebbe)); g.drawRoundedRectangle (r.reduced (0.5f), 4.f, 1.f);
         };
-        const juce::Rectangle<float> strip (44.f, 12.f, 1192.f, 80.f);
-        panel (strip);
+        paintStrip (g, { 44.f, 12.f, 1192.f, 80.f });
         drawStripLabel (g, "PATTERNS IN ORDER", 66, 24);
         drawText (g, "Song", { 66, 40, 320, 32 }, serif (22.f), juce::Colour (0xfff6e8c9));
         g.setColour (pal::line); g.fillRect (390, 24, 1, 56);
@@ -2257,11 +2345,7 @@ struct JunkDrawerEditor::MatrixPage : juce::Component, juce::ChangeListener
     void paint (juce::Graphics& g) override
     {
         paintDrawerFrame (g, false);
-        const juce::Rectangle<float> strip (44.f, 12.f, 1192.f, 80.f);
-        g.setColour (pal::panel);
-        g.fillRoundedRectangle (strip, 4.f);
-        g.setColour (juce::Colour (0x2effebbe));
-        g.drawRoundedRectangle (strip.reduced (0.5f), 4.f, 1.f);
+        paintStrip (g, { 44.f, 12.f, 1192.f, 80.f });
         drawStripLabel (g, "EVERYTHING HOOKED UP", 66, 24);
         drawText (g, "Matrix", { 66, 40, 320, 32 }, serif (22.f), juce::Colour (0xfff6e8c9));
         g.setColour (pal::line); g.fillRect (390, 24, 1, 56);
@@ -2372,7 +2456,7 @@ struct AboutPanel : juce::Component
         g.setColour (juce::Colour (0x99000000)); g.fillRoundedRectangle (c.toFloat().translated (0.f, 8.f).expanded (2.f), 8.f);
         g.setColour (juce::Colour (0xfff3ead0)); g.fillRoundedRectangle (c.toFloat(), 6.f);
         g.setColour (juce::Colour (0x665a3c1e)); g.drawRoundedRectangle (c.toFloat().reduced (0.5f), 6.f, 1.f);
-        drawText (g, "Junk Drawer", { c.getX() + 28, c.getY() + 20, 400, 32 }, serif (26.f, false), ink);
+        drawText (g, "Rotary Dial", { c.getX() + 28, c.getY() + 20, 400, 32 }, serif (26.f, false), ink);
         drawText (g, juce::String ("Version ") + kVersion + "  by Fading Fractal Audio", { c.getX() + 28, c.getY() + 54, 584, 18 }, sans (12.f), sub);
 
         static const char* heads[] = { "1. LOAD SOMETHING", "2. CHOOSE REGIONS", "3. PLAY IT ON STEPS", "4. SHAPE EACH STEP", "5. MOVE THINGS WITH LFOS", "6. CHAIN AND EXPORT" };
@@ -2562,7 +2646,7 @@ struct ExportPanel : juce::Component, juce::Timer
     void chooseFolder (bool thenExport)
     {
         auto start = settings.mode == 2 && settings.folder.isDirectory() ? settings.folder : juce::File::getSpecialLocation (juce::File::userDocumentsDirectory);
-        chooser = std::make_unique<juce::FileChooser> ("Choose the folder Junk Drawer exports go into", start);
+        chooser = std::make_unique<juce::FileChooser> ("Choose the folder Rotary Dial exports go into", start);
         juce::Component::SafePointer<ExportPanel> self (this);
         chooser->launchAsync (juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectDirectories, [self, thenExport] (const juce::FileChooser& fc)
         {
@@ -2594,7 +2678,7 @@ struct ExportPanel : juce::Component, juce::Timer
         }
         jdx::ExportSettings::saveOptions (opt);
         auto o = opt;
-        o.folder = root.getChildFile ("Junk Drawer Export " + juce::Time::getCurrentTime().formatted ("%Y-%m-%d %H-%M-%S"));
+        o.folder = root.getChildFile ("Rotary Dial Export " + juce::Time::getCurrentTime().formatted ("%Y-%m-%d %H-%M-%S"));
         lastFolder = o.folder;
         status = {}; statusOk = true; done = false;
         snap = jdx::takeSnapshot (proc);
@@ -2700,7 +2784,7 @@ struct ExportPanel : juce::Component, juce::Timer
             g.setColour (pal::brass); g.drawRoundedRectangle (r.reduced (1.f), 6.f, 2.f);
             drawText (g, "Where should exports go?", { 26, 20, getWidth() - 52, 30 }, serif (22.f, false), juce::Colour (0xff2a1b10));
             g.setFont (sans (13.f)); g.setColour (juce::Colour (0xff4a3320));
-            g.drawFittedText ("Pick a folder of your own, or let Junk Drawer save to a temporary folder. Each export gets its own dated sub-folder. You can change this any time with Change... in the Export window.",
+            g.drawFittedText ("Pick a folder of your own, or let Rotary Dial save to a temporary folder. Each export gets its own dated sub-folder. You can change this any time with Change... in the Export window.",
                               juce::Rectangle<int> (26, 54, getWidth() - 52, 60), juce::Justification::topLeft, 3);
             g.setColour (juce::Colour (0xf0241710));
             g.fillRoundedRectangle (pick.getBounds().toFloat(), 4.f); g.fillRoundedRectangle (automatic.getBounds().toFloat(), 4.f);
@@ -2797,8 +2881,7 @@ void JunkDrawerEditor::showPage (int p)
 
 void JunkDrawerEditor::paint (juce::Graphics& g)
 {
-    g.setGradientFill (juce::ColourGradient (pal::counterTop, 0, 0, pal::counterBottom, 0, (float) kH, false));
-    g.fillAll();
+    paintCabinet (g);
 }
 
 void JunkDrawerEditor::resized()

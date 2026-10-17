@@ -19,7 +19,7 @@ jobs:
         shell: bash
         run: |
           mkdir out
-          cp -r "$(find build -type d -name 'Junk Drawer.vst3' | head -1)" out/
+          cp -r "$(find build -type d -name 'Rotary Dial.vst3' | head -1)" out/
       - uses: actions/upload-artifact@v4
         with:
           name: JunkDrawer-VST3-Windows

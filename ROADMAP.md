@@ -4,7 +4,7 @@ A Fading Fractal Audio plugin. An 8-track sample sequencer: cut each sample into
 
 **Pitch:** Chop any sound into regions and let the sequencer decide which piece plays on every step.
 
-Status: concept and UI design locked (Oct 2026); build starting. Name confirmed: Junk Drawer. Run a trademark check before release (see Open Items).
+Status: concept and UI design locked (Oct 2026); build starting. Renamed Oct 2026: the plug-in is now **Rotary Dial** (seafoam tube-radio UI; presets are "stations"; Junk Drawer was the working name and the code and build targets keep it). Run a trademark check before release (see Open Items).
 
 ---
 
@@ -110,7 +110,7 @@ Step-lane engine, LFO engine, file loading, DAW recording pipeline. Pull these i
 - Export folder, same flow as DriftLooper (mockup: "Export: first time" board). Stored per computer in settings.xml, mode 0 = not asked yet, 1 = automatic (temporary folder), 2 = a folder you chose.
   - The first time Export is pressed with nothing chosen, a prompt asks "Where should exports go?" with CHOOSE A FOLDER... (opens the system folder picker, starting in Documents) or AUTO-ASSIGN (TEMPORARY FOLDER). Nothing renders until one is picked.
   - The Export window's folder line reads the chosen path, or "Automatic - a temporary folder (cleared by your system now and then)", or "Not chosen yet". CHANGE... opens a small menu: Choose a folder..., Auto-assign (temporary folder), Show the current folder.
-  - Every export goes into its own dated sub-folder ("Junk Drawer Export 2026-10-15 21-52-00"). If a chosen folder has gone missing and cannot be recreated, the window says so and opens the picker again.
+  - Every export goes into its own dated sub-folder ("Rotary Dial Export 2026-10-15 21-52-00"). If a chosen folder has gone missing and cannot be recreated, the window says so and opens the picker again.
   - Export settings are Export-window settings, not automatable parameters. Result files can be dragged into a DAW.
 - Tests: all file type x bit depth x rate combinations read back correctly (format, length, level, size estimate); bars/time lengths and the 30 minute cap; fade reaches silence without clicks; ring-out keeps tails and ends in silence; 16-bit dither error about 0.7 of a 16-bit step; disk-space refusal; options saved and restored; stems sum to the master mix; LFOs keep moving across a long export.
 

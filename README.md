@@ -1,16 +1,16 @@
-# Junk Drawer
+# Rotary Dial
 
-**A Fading Fractal Audio plugin.** An 8-track sample sequencer: cut each sample into 4-6 regions, then let every step choose which piece plays.
+**A Fading Fractal Audio plugin** (formerly Junk Drawer; the project folders and build targets keep the old name). An 8-track sample sequencer: cut each sample into 4-6 regions, then let every step choose which piece plays.
 Built with JUCE 8 (VST3 and Standalone), same setup as DriftLooper. See [ROADMAP.md](ROADMAP.md) for the plan and the final UI design.
 
 ## Where things stand (Stage 0)
 
 The shell is in place; there is no sample playback yet.
 
-* **Four pages**, all in the final layout: Drawer, LFOs, Master, Matrix.
+* **Four pages**, all in the final layout: Dial, LFOs, Master, Matrix.
 * **Real parameters** (every control on the Master and LFO pages is a host-automatable parameter): master Volume, Pan, Pitch (+ range), Rate (+ mode), Swing, Width; Filter, Delay, Reverb and Limiter with their modes and options; per-track mute, solo, level and pan; settings for all six LFOs.
 * **Audio:** stereo pass-through with master Volume and Pan, and a live output meter. Nothing else acts on the sound yet.
-* **Not built yet:** loading samples, regions, the sequencer, the LFO engine and assignments (the Matrix page is an empty state), the effects' DSP, recording, presets. The Drawer page shows an empty drawer.
+* **Not built yet:** loading samples, regions, the sequencer, the LFO engine and assignments (the Matrix page is an empty state), the effects' DSP, recording, presets. The Dial page shows an empty set of tracks.
 
 ## Build
 
@@ -19,7 +19,7 @@ cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
 cmake --build build --target JunkDrawer_VST3     # or JunkDrawer_Standalone
 ```
 
-**Windows VST3 without a Windows machine:** every push to main runs the "Windows VST3" workflow on GitHub (Actions tab). Open the latest run, download the `JunkDrawer-VST3-Windows` zip, and copy the `Junk Drawer.vst3` folder into `C:\Program Files\Common Files\VST3`.
+**Windows VST3 without a Windows machine:** every push to main runs the "Windows VST3" workflow on GitHub (Actions tab). Open the latest run, download the `JunkDrawer-VST3-Windows` zip, and copy the `Rotary Dial.vst3` folder into `C:\Program Files\Common Files\VST3`.
 
 JUCE 8.0.8 is fetched automatically. On Linux you need the usual JUCE dev packages (ALSA, X11, Xrandr, Xinerama, Xcursor, FreeType, fontconfig, GL).
 

@@ -132,7 +132,7 @@ inline const std::vector<Drawer>& factory()
 // ---- user drawers on disk ----------------------------------------------------------------------------------
 inline juce::File userFolder()
 {
-    return juce::File::getSpecialLocation (juce::File::userApplicationDataDirectory).getChildFile ("Fading Fractal Audio").getChildFile ("Junk Drawer").getChildFile ("Drawers");
+    return juce::File::getSpecialLocation (juce::File::userApplicationDataDirectory).getChildFile ("Fading Fractal Audio").getChildFile ("Rotary Dial").getChildFile ("Stations");
 }
 inline juce::String safeName (juce::String n) { return juce::File::createLegalFileName (n.trim()).substring (0, 60); }
 

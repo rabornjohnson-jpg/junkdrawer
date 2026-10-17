@@ -53,7 +53,7 @@ inline double exportBytesPerFile (const ExportOptions& o, double totalSeconds) n
 
 inline juce::File appDataFolder()
 {
-    return juce::File::getSpecialLocation (juce::File::userApplicationDataDirectory).getChildFile ("Fading Fractal Audio").getChildFile ("Junk Drawer");
+    return juce::File::getSpecialLocation (juce::File::userApplicationDataDirectory).getChildFile ("Fading Fractal Audio").getChildFile ("Rotary Dial");
 }
 
 // Where exports are written, kept per computer (not in the project).  mode: 0 = not asked yet, 1 = automatic (a temporary folder), 2 = a folder you chose.
@@ -360,7 +360,7 @@ class ExportThread : public juce::Thread
 {
 public:
     ExportThread (std::unique_ptr<ExportSnapshot> snap, ExportOptions o, std::function<void (ExportResult)> done)
-        : juce::Thread ("Junk Drawer export"), snapshot (std::move (snap)), opt (std::move (o)), onDone (std::move (done)) {}
+        : juce::Thread ("Rotary Dial export"), snapshot (std::move (snap)), opt (std::move (o)), onDone (std::move (done)) {}
     ~ExportThread() override { cancel.store (true); stopThread (10000); }
 
     std::atomic<float> progress { 0.f };
