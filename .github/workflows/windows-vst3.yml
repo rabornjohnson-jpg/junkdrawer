@@ -9,7 +9,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Configure
-        run: cmake -S . -B build -G "Visual Studio 17 2022" -A x64
+        shell: bash
+        run: |
+          cmake -S . -B build -G "Visual Studio 17 2022" -A x64 > cfg.log 2>&1 || { echo "::error::$(tail -c 1500 cfg.log | sed ':a;N;$!ba;s/\n/%0A/g')"; exit 1; }
       - name: Build
         run: cmake --build build --config Release --target JunkDrawer_VST3
       - name: Collect the VST3
