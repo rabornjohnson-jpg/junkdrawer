@@ -380,6 +380,16 @@ private:
 };
 
 //==============================================================================
+
+// A window lit from behind, in a brass frame: the same glass the waveform sits in.
+inline void paintGlass (juce::Graphics& g, juce::Rectangle<float> r)
+{
+    g.setGradientFill (juce::ColourGradient (pal::brassHi, 0.f, r.getY(), pal::brassDeep, 0.f, r.getBottom(), false));
+    g.fillRoundedRectangle (r.expanded (2.f), 7.f);
+    g.setGradientFill (juce::ColourGradient (juce::Colour (0xff9a4d1c), r.getCentreX(), r.getCentreY(), juce::Colour (0xff22100a), r.getX(), r.getY(), true));
+    g.fillRoundedRectangle (r, 5.f);
+}
+
 // Dark inset panel with an optional title.
 struct Panel : juce::Component, private juce::ChangeListener
 {
@@ -393,11 +403,12 @@ struct Panel : juce::Component, private juce::ChangeListener
     void paint (juce::Graphics& g) override
     {
         auto r = getLocalBounds().toFloat();
-        g.setColour (pal::panel);
-        g.fillRoundedRectangle (r, 4.f);
-        g.setColour (highlighted ? pal::amber.withAlpha (0.55f) : juce::Colour (0x29ffebbe));
-        g.drawRoundedRectangle (r.reduced (0.5f), 4.f, 1.f);
-        if (title.isNotEmpty()) drawText (g, title, { 14, 12, getWidth() - 200, 24 }, mono (15.f, true), pal::text);
+        g.setGradientFill (juce::ColourGradient (juce::Colour (0xf02e1a10), 0.f, 0.f, juce::Colour (0xf01a0d08), 0.f, r.getHeight(), false));
+        g.fillRoundedRectangle (r, 6.f);
+        g.setColour (highlighted ? pal::amber.withAlpha (0.8f) : pal::brassDeep.withAlpha (0.9f));
+        g.drawRoundedRectangle (r.reduced (0.5f), 6.f, highlighted ? 1.5f : 1.f);
+        g.setColour (juce::Colour (0x1fffd9a0)); g.drawHorizontalLine (1, 8.f, r.getWidth() - 8.f);
+        if (title.isNotEmpty()) drawText (g, title, { 14, 12, getWidth() - 200, 24 }, serif (17.f, true), juce::Colour (0xfff6e8c9));
     }
     juce::String title;
     bool highlighted;

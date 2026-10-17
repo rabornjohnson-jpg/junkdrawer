@@ -1881,13 +1881,12 @@ struct JunkDrawerEditor::LfoPage : juce::Component, juce::ChangeListener
         {
             Panel::paint (g);
             const juce::Rectangle<float> sc (14.f, 80.f, (float) getWidth() - 28.f, 84.f);
-            g.setColour (juce::Colour (0x66000000));
-            g.fillRoundedRectangle (sc, 4.f);
-            g.setColour (juce::Colour (0x1af0e2c4));
+            paintGlass (g, sc);
+            g.setColour (juce::Colour (0x26ffd9a0));
             g.drawHorizontalLine ((int) sc.getCentreY(), sc.getX(), sc.getRight());
             for (int k = 1; k < 4; ++k) g.drawVerticalLine ((int) (sc.getX() + sc.getWidth() * k / 4.f), sc.getY(), sc.getBottom());
             const int shape = juce::roundToInt (state.getRawParameterValue (jd::lfoId (index, "shape"))->load());
-            g.setColour (pal::amber);
+            g.setColour (juce::Colour (0xfffbd78a));
             g.strokePath (lfoPath (shape, sc.getWidth(), sc.getHeight()), juce::PathStrokeType (2.f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded),
                           juce::AffineTransform::translation (sc.getX(), sc.getY()));
             drawHooked (g, 14, 296, getWidth() - 28, [this] (const LinkInfo& l) { return l.lfo == index; }, [] (const LinkInfo& l) { return l.name; });
@@ -2003,9 +2002,8 @@ struct JunkDrawerEditor::MasterPage : juce::Component
             Panel::paint (g);
             const bool on = v (cfg.on) > 0.5f;
             const juce::Rectangle<float> vz (14.f, 80.f, (float) getWidth() - 28.f, 84.f);
-            g.setColour (juce::Colour (0x66000000));
-            g.fillRoundedRectangle (vz, 4.f);
-            g.setColour (juce::Colour (0x1af0e2c4));
+            paintGlass (g, vz);
+            g.setColour (juce::Colour (0x26ffd9a0));
             g.drawHorizontalLine ((int) vz.getCentreY(), vz.getX(), vz.getRight());
             for (int k = 1; k < 4; ++k) g.drawVerticalLine ((int) (vz.getX() + vz.getWidth() * k / 4.f), vz.getY(), vz.getBottom());
 
