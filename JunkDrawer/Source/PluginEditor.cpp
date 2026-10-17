@@ -1445,12 +1445,22 @@ struct Junk : juce::Component
 // Drawer page
 struct JunkDrawerEditor::DrawerPage : juce::Component, juce::ChangeListener
 {
-    struct LfoTile : juce::Component, juce::SettableTooltipClient
+    struct LfoTile : juce::Component, juce::SettableTooltipClient, private juce::Timer
     {
         LfoTile (JunkDrawerProcessor& p, int i) : index (i), proc (p), state (p.state), wShape (p.state, jd::lfoId (i, "shape"), *this), wRate (p.state, jd::lfoId (i, "rate"), *this),
                                     wDiv (p.state, jd::lfoId (i, "div"), *this), wSync (p.state, jd::lfoId (i, "sync"), *this)
         { setTooltip ("LFO " + juce::String (i + 1) + ". Click to start assigning it: then drag any knob up or down to set how much this LFO moves it. Click again to stop."); }
         void mouseDown (const juce::MouseEvent&) override { proc.setArmedLfo (proc.armedLfo() == index ? -1 : index); }
+
+        // A small dot at the right edge rides this LFO's live value.  Cheap: 15 Hz, only while shown, off with Reduce motion.
+        void visibilityChanged() override { if (isShowing()) startTimerHz (15); else stopTimer(); }
+        void timerCallback() override
+        {
+            if ((bool) state.state.getProperty ("reduceMotion", false)) { if (dot != 0.f) { dot = 0.f; repaint(); } return; }
+            const float v = juce::jlimit (-1.f, 1.f, proc.lfoValue (index));
+            if (std::abs (v - dot) > 0.01f) { dot = v; repaint(); }
+        }
+        float dot = 0.f;
 
         void paint (juce::Graphics& g) override
         {
@@ -1466,6 +1476,11 @@ struct JunkDrawerEditor::DrawerPage : juce::Component, juce::ChangeListener
             const float hz  = state.getRawParameterValue (jd::lfoId (index, "rate"))->load();
             const int div   = juce::roundToInt (state.getRawParameterValue (jd::lfoId (index, "div"))->load());
             drawText (g, "L" + juce::String (index + 1), { 8, 3, 30, 16 }, mono (12.f, true), pal::text);
+            if (dot != 0.f)
+            {
+                g.setColour (pal::amber);
+                g.fillEllipse ((float) getWidth() - 12.f, 27.f - 7.f * dot - 2.5f, 5.f, 5.f);
+            }
 
             auto wave = lfoPath (shape, (float) getWidth() - 20.f, 14.f);
             g.setColour (pal::textDim);
