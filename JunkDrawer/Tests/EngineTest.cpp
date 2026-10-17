@@ -445,6 +445,34 @@ int main()
         setP (sq, "seq_run", 0.f);
     }
 
+    // ratchet chance, bounce and weighted order
+    {
+        auto restart = [&] { setP (sq, "seq_run", 0.f); run (sq, 0.1, rate); setP (sq, "seq_run", 1.f); };
+        onlySteps ({ 0 });
+        setP (sq, jd::stepId (0, 0, jd::LaneRatchet), 4.f);
+        setP (sq, jd::trackId (0, "rshape"), 4.f);                            // bounce: loud, soft, soft, loud
+        restart();
+        o = run (sq, 0.2, rate);
+        check (win (o, 100, 900) > win (o, 1600, 2300) * 1.5f && win (o, 4600, 5300) > win (o, 3100, 3800) * 1.5f, "a bouncing ratchet dips in the middle");
+        setP (sq, jd::trackId (0, "rshape"), 0.f);
+        setP (sq, jd::trackId (0, "rprob"), 0.f);
+        restart();
+        o = run (sq, 0.2, rate);
+        check (win (o, 100, 900) > 0.05f && win (o, 4600, 5300) < win (o, 100, 900) * 0.5f, "ratchet chance at zero keeps only the first hit");
+        setP (sq, jd::trackId (0, "rprob"), 1.f);
+        setP (sq, jd::stepId (0, 0, jd::LaneRatchet), 1.f);
+        sq.sliceEqual (0, 3);
+        onlySteps ({ 0, 1, 2, 3 });
+        setP (sq, jd::trackId (0, "order"), 4.f);
+        restart();
+        o = run (sq, 0.6, rate);
+        check (win (o, 100, 900) > 0.01f && win (o, 6100, 6900) > 0.01f, "mostly-as-written order still plays the written steps");
+        setP (sq, jd::trackId (0, "order"), 0.f);
+        sq.sliceEqual (0, 1);
+        setP (sq, "seq_run", 0.f);
+        onlySteps ({ 0, 2 });
+    }
+
     // loop conditions (the Region lane is 16 steps, so a pass is 96000 samples at 120 BPM)
     {
         auto restart = [&] { setP (sq, "seq_run", 0.f); run (sq, 0.1, rate); setP (sq, "seq_run", 1.f); };

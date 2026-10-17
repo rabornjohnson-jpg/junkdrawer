@@ -39,7 +39,7 @@ JunkDrawerProcessor::JunkDrawerProcessor()
         audition[(size_t) t] = 0; playing[(size_t) t] = 0; loadToken[(size_t) t] = 0;
         tp[(size_t) t] = { state.getRawParameterValue (jd::trackId (t, "mute")), state.getRawParameterValue (jd::trackId (t, "solo")),
                            state.getRawParameterValue (jd::trackId (t, "level")), state.getRawParameterValue (jd::trackId (t, "pan")),
-                           state.getRawParameterValue (jd::trackId (t, "tune")), state.getRawParameterValue (jd::trackId (t, "order")), state.getRawParameterValue (jd::trackId (t, "cond")), state.getRawParameterValue (jd::trackId (t, "rshape")), state.getRawParameterValue (jd::trackId (t, "morph")), state.getRawParameterValue (jd::trackId (t, "senddel")), state.getRawParameterValue (jd::trackId (t, "sendrev")) };
+                           state.getRawParameterValue (jd::trackId (t, "tune")), state.getRawParameterValue (jd::trackId (t, "order")), state.getRawParameterValue (jd::trackId (t, "cond")), state.getRawParameterValue (jd::trackId (t, "rshape")), state.getRawParameterValue (jd::trackId (t, "morph")), state.getRawParameterValue (jd::trackId (t, "rprob")), state.getRawParameterValue (jd::trackId (t, "senddel")), state.getRawParameterValue (jd::trackId (t, "sendrev")) };
         for (int r = 0; r < jd::kRegions; ++r)
         {
             auto g = [&] (const char* s) { return state.getRawParameterValue (jd::regionId (t, r, s)); };
@@ -482,6 +482,12 @@ void JunkDrawerProcessor::processBlock (juce::AudioBuffer<float>& buf, juce::Mid
                     d = slots[(size_t) t].data;
                 }
                 if (d == nullptr) continue;
+                if (q.sub > 0)
+                {
+                    // Ratchet chance: each repeat after the first may drop out, the same way every run
+                    const float rp = v (tp[(size_t) t].rprob);
+                    if (rp < 0.999f && jd::hash01 ((juce::uint32) (q.step * 40503LL + (long long) t * 7919LL + (long long) q.sub * 131LL + 29LL)) >= rp) continue;
+                }
                 auto s = readRegion (t, q.region - 1);
                 s.pitch += q.pitch + masterPitch + v (tp[(size_t) t].tune);
                 if (q.dir == 1) s.reverse = false; else if (q.dir == 2) s.reverse = true;
@@ -494,6 +500,7 @@ void JunkDrawerProcessor::processBlock (juce::AudioBuffer<float>& buf, juce::Mid
                     if (shape == 1) shapeGain = 1.f - 0.7f * k;
                     else if (shape == 2) shapeGain = 0.3f + 0.7f * k;
                     else if (shape == 3) s.pitch += 2.f * (float) juce::jmax (0, q.sub);
+                    else if (shape == 4) shapeGain = 1.f - 0.7f * std::sin (juce::MathConstants<float>::pi * k);
                 }
                 const float g = juce::Decibels::decibelsToGain (v (tp[(size_t) t].level), -59.f) * q.vol * shapeGain;
                 const float panNow = juce::jlimit (-1.f, 1.f, v (tp[(size_t) t].pan) + q.pan);
@@ -638,6 +645,12 @@ void JunkDrawerProcessor::applyStep (int t, SeqTrack& q, long long step, int pat
         const int mode = juce::roundToInt (tp[(size_t) t].order->load());
         if (mode == 1) q.region = 1 + (int) (step % count);
         else if (mode == 2) { const int per = 2 * (count - 1), k = (int) (step % per); q.region = 1 + (k < count ? k : per - k); }
+        else if (mode == 4)
+        {
+            // Mostly as written: about 60 % of the steps keep their region, the rest wander to any region
+            const float h = jd::hash01 ((juce::uint32) (step * 69069LL + (long long) t * 1013LL + 9LL));
+            if (h >= 0.6f) q.region = 1 + juce::jmin (count - 1, (int) (jd::hash01 ((juce::uint32) (step * 40503LL + (long long) t * 7919LL + 31LL)) * (float) count));
+        }
         else if (mode == 3) q.region = 1 + juce::jmin (count - 1, (int) (jd::hash01 ((juce::uint32) (step * 69069LL + (long long) t * 1013LL + 5LL)) * (float) count));
     }
     if (q.region > 0)

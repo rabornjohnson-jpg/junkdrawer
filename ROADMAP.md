@@ -83,8 +83,8 @@ Step-lane engine, LFO engine, file loading, DAW recording pipeline. Pull these i
 - Per-step pan lane: BUILT (ninth lane tab).
 - Per-step probability (Chance lane) and micro-timing (Timing lane, early or late by up to half a step): BUILT. Chance uses fixed dice, so every run and every export plays the same. Rummage and Shake leave these two lanes alone. Loop conditions (every 2nd, 3rd or 4th loop, first loop only) are per track, in the lane Edit menu under "This track plays".
 - Per-step filter, pan, and gate/hold.
-- Ratchet shapes: BUILT per track (lane Edit menu): Even, Fade out, Swell, Climb. Still open: bouncing and ratchet probability.
-- Region order: BUILT (per track, in the lane Edit menu): As written, Walk, Pendulum, Random. Still open: weighted random.
+- Ratchet shapes: BUILT per track (lane Edit menu): Even, Fade out, Swell, Climb. Bounce shape and Ratchet repeats play (100, 75, 50, 25 %) are in the same menu.
+- Region order: BUILT (per track, in the lane Edit menu): As written, Walk, Pendulum, Random. "Mostly as written" is the weighted random.
 - Region morphing: BUILT. A per-track Morph knob (LFO-assignable) in the Regions card blends each step's region with the next region, equal power; a second voice runs only while Morph is above zero.
 - Polymeter lane lengths: BUILT (every lane loops at its own length, set with the Steps buttons; tested).
 - Pattern chaining: BUILT. Eight patterns (A-H), a 16-slot chain with 1/2/4/8-bar lengths, changes on the bar line, saved with the project, followed by Export. Song page plus the lane Edit menu.
