@@ -4,6 +4,7 @@
 #include "PluginEditor.h"
 #include "Exporter.h"
 
+static void paintAll (JunkDrawerEditor& root, juce::Component& c);
 namespace
 {
 bool isLeaf (juce::Component* c)
@@ -32,9 +33,19 @@ juce::String describe (juce::Component* c)
 
 int checkLayout (juce::Component& root, const juce::String& page)
 {
+    int cut = 0;
+    auto* ed = dynamic_cast<JunkDrawerEditor*> (&root);
+    if (ed == nullptr) ed = root.findParentComponentOfClass<JunkDrawerEditor>();
+    if (ed != nullptr)
+    {
+        std::vector<juce::String> over;
+        ui::overflowSink() = &over; paintAll (*ed, root); ui::overflowSink() = nullptr;
+        std::set<juce::String> seen;
+        for (auto& s : over) if (seen.insert (s).second) { std::printf ("  [%s] TEXT DOES NOT FIT: %s\n", page.toRawUTF8(), s.toRawUTF8()); ++cut; }
+    }
     std::vector<juce::Component*> v;
     collect (&root, v);
-    int bad = 0;
+    int bad = cut;
     for (size_t i = 0; i < v.size(); ++i)
     {
         if (! visibleWithin (v[i], &root)) continue;
@@ -308,7 +319,7 @@ int main (int argc, char** argv)
                 for (int k = only->getNumChildComponents() - 1; k >= 0; --k) if (only->getChildComponent (k)->isVisible()) { only = only->getChildComponent (k); break; }
             audit (name, only);
         };
-        jdx::ExportSettings st; st.mode = 2; st.folder = juce::File ("/home/ray/Music/Junk Drawer exports"); st.save();
+        jdx::ExportSettings st; st.mode = 2; st.folder = juce::File ("/home/ray/Music/Rotary Dial exports"); st.save();
         editor->showPage (0);
         editor->openExport();
         shot ("export.png");
@@ -346,6 +357,33 @@ int main (int argc, char** argv)
         { for (auto& f : d.findChildFiles (juce::File::findFiles, false, "*.wav")) { ++made; std::printf ("export wrote %s (%lld bytes)\n", f.getFileName().toRawUTF8(), (long long) f.getSize()); } d.deleteRecursively(); }
         if (made == 0) { std::printf ("export through the window wrote nothing\n"); ++problems; }
         jdx::ExportSettings none; none.save();
+    }
+
+    // Every page that refreshes itself on a timer must be ticking whenever it is on screen, also after the look was switched there and back.
+    {
+        auto idle = [&] (const char* when)
+        {
+            int dead = 0, total = 0;
+            std::function<void (juce::Component&)> walk = [&] (juce::Component& c)
+            {
+                if (auto* t = dynamic_cast<juce::Timer*> (&c))
+                {
+                    const juce::String n (typeid (c).name());
+                    if (ui::shown (c) && (n.contains ("StepGrid") || n.contains ("LfoTile") || n.contains ("TrackRow") || n.contains ("SongPage") || n.contains ("Junk")))
+                    { ++total; if (! t->isTimerRunning()) { ++dead; std::printf ("  not ticking: %s\n", typeid (c).name()); } }
+                }
+                for (auto* ch : c.getChildren()) walk (*ch);
+            };
+            walk (*editor);
+            std::printf ("timers %s: %d on screen, %d not ticking\n", when, total, dead);
+            problems += dead;
+        };
+        editor->showPage (0);
+        idle ("at the start");
+        editor->setHighContrast (true);  editor->showPage (0);
+        idle ("in high contrast");
+        editor->setHighContrast (false); editor->showPage (0);
+        idle ("back in the standard look");
     }
     std::printf ("layout problems: %d\n", problems);
     ed.reset();

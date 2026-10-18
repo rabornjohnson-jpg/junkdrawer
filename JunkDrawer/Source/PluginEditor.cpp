@@ -127,11 +127,11 @@ std::pair<juce::String, juce::String> describeTarget (APVTS& s, const juce::Stri
 // "HOOKED UP" and a chip for each link that matches; "Nothing attached yet." when none do.
 void drawHooked (juce::Graphics& g, int x, int y, int width, const std::function<bool (const LinkInfo&)>& match, const std::function<juce::String (const LinkInfo&)>& label)
 {
-    drawText (g, "HOOKED UP", { x, y, 80, 24 }, sans (11.f, true).withExtraKerningFactor (0.12f), pal::textDim);
+    drawText (g, "HOOKED UP", { x, y, 104, 26 }, sans (14.f, true).withExtraKerningFactor (0.1f), pal::textDim);
     std::vector<LinkInfo> mine;
     if (auto* c = currentMod()) for (auto& l : c->links()) if (match (l)) mine.push_back (l);
-    if (mine.empty()) { drawText (g, hookedNone(), { x + 88, y, 220, 24 }, mono (11.f), pal::textDim); return; }
-    int cx = x + 88;
+    if (mine.empty()) { drawText (g, hookedNone(), { x + 112, y, 240, 26 }, mono (14.f), pal::textDim); return; }
+    int cx = x + 112;
     for (size_t i = 0; i < mine.size(); ++i)
     {
         const auto t = label (mine[i]);
@@ -140,10 +140,10 @@ void drawHooked (juce::Graphics& g, int x, int y, int width, const std::function
         const int more = (int) (mine.size() - i);
         if (cx + w + (last ? 0 : 40) > x + width)
         {
-            drawChip (g, { cx, y + 1, chipWidth ("+" + juce::String (more)), 22 }, "+" + juce::String (more));
+            drawChip (g, { cx, y, chipWidth ("+" + juce::String (more)), 26 }, "+" + juce::String (more));
             return;
         }
-        drawChip (g, { cx, y + 1, w, 22 }, t);
+        drawChip (g, { cx, y, w, 26 }, t);
         cx += w + 6;
     }
 }
@@ -175,6 +175,15 @@ struct JunkDrawerEditor::Header : juce::Component, juce::Timer, juce::ChangeList
             addAndMakeVisible (b);
         }
         tabs[0].setToggleState (true, juce::dontSendNotification);
+        undoBtn.setButtonText ("Undo"); redoBtn.setButtonText ("Redo");
+        undoBtn.getProperties().set ("mint", true); redoBtn.getProperties().set ("mint", true);
+        undoBtn.setTooltip ("Take back the last change (Ctrl+Z)"); redoBtn.setTooltip ("Put back what Undo took away (Ctrl+Y)");
+        undoBtn.setTitle ("Undo"); redoBtn.setTitle ("Redo");
+        undoBtn.onClick = [this] { ed.proc.history().undo(); updateUndo(); };
+        redoBtn.onClick = [this] { ed.proc.history().redo(); updateUndo(); };
+        addAndMakeVisible (undoBtn); addAndMakeVisible (redoBtn);
+        ed.proc.history().onChange = [safe = juce::Component::SafePointer<Header> (this)] { if (safe != nullptr) safe->updateUndo(); };
+        updateUndo();
         reduce.setButtonText ("Reduce motion");
         reduce.getProperties().set ("switch", true);
         exportBtn.getProperties().set ("mint", true);
@@ -219,18 +228,26 @@ struct JunkDrawerEditor::Header : juce::Component, juce::Timer, juce::ChangeList
         startTimerHz (4);
     }
 
-    ~Header() override { ed.proc.removeChangeListener (this); }
     void changeListenerCallback (juce::ChangeBroadcaster*) override { repaint(); if (stationBar != nullptr) stationBar->invalidateAccessibilityHandler(); }
     void select (int i) { tabs[(size_t) i].setToggleState (true, juce::dontSendNotification); }
 
+    ~Header() override { ed.proc.history().onChange = nullptr; ed.proc.removeChangeListener (this); }
+    void updateUndo()
+    {
+        undoBtn.setEnabled (ed.proc.history().canUndo());
+        redoBtn.setEnabled (ed.proc.history().canRedo());
+    }
+
     void resized() override
     {
-        int x = 300;
-        for (auto& b : tabs) { b.setBounds (x, 16, 60, 28); x += 64; }
+        int x = 272;
+        for (auto& b : tabs) { b.setBounds (x, 16, 56, 28); x += 60; }
+        undoBtn.setBounds (872, 16, 44, 28);
+        redoBtn.setBounds (920, 16, 44, 28);
         reduce.setBounds (getWidth() - 44 - 150, 6, 150, 21);
         hiCon.setBounds (getWidth() - 44 - 150, 28, 150, 21);
         stationBar->setBounds (barArea().expanded (3));
-        exportBtn.setBounds (896, 16, 64, 28);
+        exportBtn.setBounds (806, 16, 60, 28);
     }
 
     void timerCallback() override
@@ -251,7 +268,7 @@ struct JunkDrawerEditor::Header : juce::Component, juce::Timer, juce::ChangeList
     }
     void mouseMove (const juce::MouseEvent& e) override { setMouseCursor (barArea().contains (e.getPosition()) ? juce::MouseCursor::PointingHandCursor : juce::MouseCursor::NormalCursor); }
 
-    juce::Rectangle<int> barArea() const { return { 626, 15, 262, 30 }; }
+    juce::Rectangle<int> barArea() const { return { 576, 15, 220, 30 }; }
 
     void openMenu()
     {
@@ -360,11 +377,11 @@ struct JunkDrawerEditor::Header : juce::Component, juce::Timer, juce::ChangeList
     void paint (juce::Graphics& g) override
     {
         if (highContrast()) drawLogo (g, { 44, 14, 58, 30 }); else drawInkLogo (g, { 44, 14, 58, 30 });
-        drawText (g, "FADING FRACTAL AUDIO", { 112, 13, 180, 13 }, sans (11.f, true).withExtraKerningFactor (0.1f), pal::mintInk.withAlpha (0.8f));
+        drawText (g, "FADING FRACTAL AUDIO", { 112, 13, 180, 13 }, sans (14.f, true).withExtraKerningFactor (0.1f), pal::mintInk.withAlpha (0.8f));
         drawText (g, "Rotary Dial", { 112, 25, 180, 26 }, serif (23.f), pal::mintInk);
 
         // The station window: brass frame, glass lit from behind.
-        const juce::Rectangle<float> bar (626.f, 15.f, 262.f, 30.f);
+        const juce::Rectangle<float> bar (576.f, 15.f, 220.f, 30.f);
         g.setGradientFill (juce::ColourGradient (pal::brassHi, 0.f, bar.getY(), pal::brassDeep, 0.f, bar.getBottom(), false));
         g.fillRoundedRectangle (bar.expanded (3.f), 9.f);
         g.setGradientFill (juce::ColourGradient (juce::Colour (0xfffbe6a8), bar.getCentreX(), bar.getCentreY(), juce::Colour (0xffd98f36), bar.getX(), bar.getY(), true));
@@ -380,16 +397,16 @@ struct JunkDrawerEditor::Header : juce::Component, juce::Timer, juce::ChangeList
         {
             const auto pill = bpmArea();
             g.setColour (pal::amber); g.fillRoundedRectangle (pill.toFloat(), 14.f);
-            drawText (g, "Assigning L" + juce::String (ed.proc.armedLfo() + 1), pill, sans (12.f, true), pal::amberInk, juce::Justification::centred);
+            drawText (g, "Assigning L" + juce::String (ed.proc.armedLfo() + 1), pill, sans (14.f, true), pal::amberInk, juce::Justification::centred);
         }
         else
-            drawText (g, bpm > 0.0 ? juce::String (bpm, 1) + " BPM" : juce::String ("No host tempo"), bpmArea(), mono (12.f), pal::mintInk, juce::Justification::centredRight);
+            drawText (g, bpm > 0.0 ? juce::String (bpm, 1) + " BPM" : juce::String ("No host tempo"), bpmArea(), mono (14.f), pal::mintInk, juce::Justification::centredRight);
     }
 
     JunkDrawerEditor& ed;
     std::array<juce::TextButton, NumPages> tabs;
     std::unique_ptr<juce::FileChooser> chooser;
-    juce::TextButton reduce, exportBtn, hiCon;
+    juce::TextButton reduce, exportBtn, hiCon, undoBtn, redoBtn;
     std::unique_ptr<ui::FocusProxy> stationBar;
     double bpm = 0.0;
 };
@@ -507,7 +524,10 @@ struct WaveView : juce::Component, juce::SettableTooltipClient
             {
                 const float cx = (a + b) * 0.5f;
                 drawRegionPart (g, i, { cx - 13.f, 8.f, 26.f, 26.f }, sel ? 1.f : 0.9f);
-                drawText (g, regionPartName (i), { (int) cx - 40, 36, 80, 14 }, sans (11.f, true), juce::Colour (0xfffbe9c2), juce::Justification::centred);
+                const float nw = sans (14.f, true).getStringWidthFloat (regionPartName (i)) + 14.f;
+                g.setColour (highContrast() ? juce::Colours::black : juce::Colour (0x99140a04));
+                g.fillRoundedRectangle (cx - nw * 0.5f, 35.f, nw, 17.f, 8.f);
+                drawText (g, regionPartName (i), { (int) cx - 40, 36, 80, 16 }, sans (14.f, true), juce::Colour (0xfffbe9c2), juce::Justification::centred);
             }
             // brass grips on the region edges
             for (float ex : { a, b })
@@ -683,12 +703,12 @@ struct RegionTag : Panel
         auto td = proc.getTrack (tr);
         const double dur = td != nullptr ? td->seconds() : 0.0;
         const float a = plainValue (proc, jd::regionId (tr, reg, "start")), b = plainValue (proc, jd::regionId (tr, reg, "end"));
-        drawText (g, "Start " + seconds (a * dur), { 12, 258, 100, 16 }, mono (11.f), sub);
-        drawText (g, "End " + seconds (b * dur), { 12, 274, 100, 16 }, mono (11.f), sub);
+        drawText (g, "Start " + seconds (a * dur), { 12, 258, 100, 16 }, mono (14.f), sub);
+        drawText (g, "End " + seconds (b * dur), { 12, 274, 100, 16 }, mono (14.f), sub);
         if (td != nullptr && (a != seenA || b != seenB || td.get() != seenData)) { seenA = a; seenB = b; seenData = td.get(); pitch = proc.regionPitch (tr, reg); }
-        drawText (g, pitch.found ? jd::noteText (pitch.midi) : juce::String ("no note"), { getWidth() - 12 - 90, 256, 90, 16 }, mono (11.f, true), pitch.found ? ink : sub.withAlpha (0.6f), juce::Justification::centredRight);
+        drawText (g, pitch.found ? jd::noteText (pitch.midi) : juce::String ("no note"), { getWidth() - 12 - 90, 256, 90, 16 }, mono (14.f, true), pitch.found ? ink : sub.withAlpha (0.6f), juce::Justification::centredRight);
         tuneBtn.setEnabled (pitch.found);
-        drawText (g, "ENVELOPE", { 12, 298, 120, 14 }, sans (11.f, true).withExtraKerningFactor (0.16f), sub);
+        drawText (g, "ENVELOPE", { 12, 298, 120, 14 }, sans (14.f, true).withExtraKerningFactor (0.16f), sub);
         g.setColour (juce::Colour (0xf0241710));
         for (auto* c : std::initializer_list<juce::Component*> { &rev, &tuneBtn, loop.get() }) g.fillRoundedRectangle (c->getBounds().toFloat(), 4.f);
     }
@@ -737,6 +757,7 @@ struct StepGrid : juce::Component, juce::Timer, juce::SettableTooltipClient
             return false;
         };
         addAndMakeVisible (*keys);
+        startTimerHz (30);
     }
 
     int cursor = 0;
@@ -789,10 +810,9 @@ struct StepGrid : juce::Component, juce::Timer, juce::SettableTooltipClient
     int laneIndex() const { return lane; }
     std::function<void()> onChanged;
 
-    void visibilityChanged() override { if (isShowing()) startTimerHz (30); else stopTimer(); }
-
     void timerCallback() override
     {
+        if (! ui::shown (*this)) return;
         juce::int64 h = 1469598103934665603LL;
         auto mix = [&] (float v) { h = (h ^ (juce::int64) std::lround (v * 1000.f)) * 1099511628211LL; };
         mix ((float) track); mix ((float) lane);
@@ -832,8 +852,8 @@ struct StepGrid : juce::Component, juce::Timer, juce::SettableTooltipClient
     void paint (juce::Graphics& g) override
     {
         static const char* names[] = { "Region", "Volume", "Pitch", "Ratchet", "Direction", "Length", "Chance", "Timing", "Pan" };
-        drawText (g, names[lane], { 0, 0, labelW - 6, stripH }, sans (11.f, true), juce::Colour (0xff4a3320));
-        drawText (g, "Volume", { 0, overviewY, labelW - 6, overviewH }, sans (11.f, true), juce::Colour (0xff4a3320));
+        drawText (g, names[lane], { 0, 0, labelW - 6, stripH }, sans (14.f, true), juce::Colour (0xff2a1b10));
+        drawText (g, "Volume", { 0, overviewY, labelW - 6, overviewH }, sans (14.f, true), juce::Colour (0xff2a1b10));
 
         const juce::Rectangle<float> strip ((float) labelW, 0.f, (float) stripW, (float) stripH);
         g.setGradientFill (juce::ColourGradient (pal::brassHi, 0.f, 0.f, pal::brassDeep, 0.f, (float) stripH, false));
@@ -853,7 +873,7 @@ struct StepGrid : juce::Component, juce::Timer, juce::SettableTooltipClient
             stepIndexForBadge = i;
             if (on) paintValue (g, c, v, count);
             stepIndexForBadge = -1;
-            drawText (g, juce::String (i + 1), { (int) c.getX(), (int) c.getBottom() - 15, (int) c.getWidth(), 14 }, mono (11.f), juce::Colour (0xffcdb589).withAlpha (on ? 1.f : 0.45f), juce::Justification::centred);
+            drawText (g, juce::String (i + 1), { (int) c.getX(), (int) c.getBottom() - 15, (int) c.getWidth(), 14 }, mono (14.f), juce::Colour (0xffcdb589).withAlpha (on ? 1.f : 0.45f), juce::Justification::centred);
             if (glow[(size_t) i] > 0.f) { g.setColour (pal::amber.withAlpha (0.22f * glow[(size_t) i])); g.fillRoundedRectangle (c, 3.f); }
             if (i == cur) { g.setColour (pal::amber); g.drawRoundedRectangle (c.reduced (0.5f), 3.f, 2.f); }
         }
@@ -880,7 +900,7 @@ struct StepGrid : juce::Component, juce::Timer, juce::SettableTooltipClient
     {
         const auto bar = juce::Rectangle<float> (c.getX() + 4.f, c.getY() + 18.f, c.getWidth() - 8.f, c.getHeight() - 38.f);
         auto fill = [&] (float frac) { g.setColour (pal::amber); g.fillRect (bar.withTrimmedTop (bar.getHeight() * (1.f - juce::jlimit (0.f, 1.f, frac)))); };
-        auto top = [&] (const juce::String& t) { drawText (g, t, { (int) c.getX(), (int) c.getY() + 2, (int) c.getWidth(), 14 }, mono (11.f), pal::text, juce::Justification::centred); };
+        auto top = [&] (const juce::String& t) { drawText (g, t, { (int) c.getX(), (int) c.getY() + 2, (int) c.getWidth(), 14 }, mono (14.f), pal::text, juce::Justification::centred); };
         if (lane != jd::LaneRegion && lane != jd::LaneDirection) { g.setColour (juce::Colour (0x40f0e2c4)); g.drawRect (bar, 1.f); }
         switch (lane)
         {
@@ -901,7 +921,7 @@ struct StepGrid : juce::Component, juce::Timer, juce::SettableTooltipClient
                         {
                             const auto pill = juce::Rectangle<float> (c.getCentreX() - 12.f, c.getY() + 1.f, 24.f, 13.f);
                             g.setColour (cream()); g.fillRoundedRectangle (pill, 6.f);
-                            drawText (g, tag, pill.toNearestInt(), sans (11.f, true), juce::Colour (0xff2a1b10), juce::Justification::centred);
+                            drawText (g, tag, pill.toNearestInt(), sans (14.f, true), juce::Colour (0xff2a1b10), juce::Justification::centred);
                         }
                     }
                 }
@@ -945,7 +965,7 @@ struct StepGrid : juce::Component, juce::Timer, juce::SettableTooltipClient
                 const auto chip = c.withSizeKeepingCentre (c.getWidth() - 8.f, 30.f).withY (c.getY() + 14.f);
                 g.setColour (pal::amber.withAlpha (d == 0 ? 0.25f : 1.f));
                 g.fillRoundedRectangle (chip, 4.f);
-                drawText (g, d == 0 ? "Reg" : (d == 1 ? "Fwd" : "Rev"), chip.toNearestInt(), sans (11.f, true), d == 0 ? pal::text : pal::amberInk, juce::Justification::centred);
+                drawText (g, d == 0 ? "Reg" : (d == 1 ? "Fwd" : "Rev"), chip.toNearestInt(), sans (14.f, true), d == 0 ? pal::text : pal::amberInk, juce::Justification::centred);
                 break;
             }
         }
@@ -1098,7 +1118,7 @@ struct RecPanel : juce::Component, juce::Timer
     void paint (juce::Graphics& g) override
     {
         update();
-        const auto ink = juce::Colour (0xff2a1b10), red = juce::Colour (0xffa63f1d), sub = juce::Colour (0xff5a4329);
+        const auto ink = juce::Colour (0xff2a1b10), red = juce::Colour (0xff962f14), sub = juce::Colour (0xff5a4329);
         const auto r = getLocalBounds().toFloat();
         g.setColour (highContrast() ? juce::Colours::white : juce::Colour (0xfff1e7c9)); g.fillRoundedRectangle (r, 3.f);
         g.setColour (juce::Colour (0x4d5a3c1e)); g.drawRoundedRectangle (r.reduced (0.5f), 3.f, 1.f);
@@ -1108,11 +1128,11 @@ struct RecPanel : juce::Component, juce::Timer
         g.setColour (running ? red : (waiting ? juce::Colour (0xffb8893a) : juce::Colour (0xff9a8a68)));
         g.fillEllipse (14.f, 15.f, 11.f, 11.f);
         const juce::String stateLabel = running ? "CATCHING" : waiting ? (start.selected() == 1 ? "WAITING FOR THE BAR" : "WAITING FOR SOUND") : "READY";
-        drawText (g, stateLabel, { 32, 10, 190, 20 }, sans (11.f, true).withExtraKerningFactor (0.14f), running ? red : sub);
+        drawText (g, stateLabel, { 32, 10, 190, 20 }, sans (14.f, true).withExtraKerningFactor (0.14f), running ? red : sub);
         if (running) drawText (g, clock (proc.catchSeconds()), { 222, 10, 70, 20 }, mono (13.f, true), ink);
-        if (clipHold > 0) drawText (g, "Input too loud", { 140, 10, 140, 20 }, sans (11.f, true), red, juce::Justification::centredRight);
-        else if (st == Proc::CatchIdle) drawText (g, "Up to 1:00 per track", { 140, 10, 140, 20 }, sans (11.f), sub, juce::Justification::centredRight);
-        else drawText (g, "Up to 1:00 per track", { 272, 10, 134, 20 }, sans (11.f), sub, juce::Justification::centredRight);
+        if (clipHold > 0) drawText (g, "Input too loud", { 140, 10, 140, 20 }, sans (14.f, true), red, juce::Justification::centredRight);
+        else if (st == Proc::CatchIdle) drawText (g, "Up to 1:00 per track", { 140, 10, 140, 20 }, sans (14.f), sub, juce::Justification::centredRight);
+        else drawText (g, "Up to 1:00 per track", { 272, 10, 134, 20 }, sans (14.f), sub, juce::Justification::centredRight);
 
         const juce::Rectangle<int> well (14, 34, 392, 164);
         g.setColour (juce::Colour (0xffe6dab6)); g.fillRoundedRectangle (well.toFloat(), 2.f);
@@ -1141,7 +1161,7 @@ struct RecPanel : juce::Component, juce::Timer
             {
                 const int x = well.getX() + (int) std::round (t / span * well.getWidth());
                 g.setColour (juce::Colour (0x80281608)); g.fillRect (x, well.getBottom() - 8, 1, 8);
-                drawText (g, clock (t).dropLastCharacters (2), { x + 3, well.getBottom() - 20, 40, 16 }, mono (11.f), sub);
+                drawText (g, clock (t).dropLastCharacters (2), { x + 3, well.getBottom() - 20, 40, 16 }, mono (14.f), sub);
             }
         }
 
@@ -1149,13 +1169,13 @@ struct RecPanel : juce::Component, juce::Timer
         {
             const float have = proc.catchLastSeconds();
             drawText (g, proc.listening() ? (have < 0.25f ? juce::String ("Listening. Nothing yet.") : juce::String (have, 1) + " s ready") : juce::String ("Not listening"),
-                      { well.getX() + 118, well.getBottom() - 34, 130, 24 }, sans (11.f), sub, juce::Justification::centred);
+                      { well.getX() + 118, well.getBottom() - 34, 130, 24 }, sans (14.f), sub, juce::Justification::centred);
             g.setColour (juce::Colour (0xf0241710));
             for (auto* c : { &listen, &grab }) g.fillRoundedRectangle (c->getBounds().toFloat(), 4.f);
         }
 
         const int cx = 424;
-        auto label = [&] (const juce::String& t, int y) { drawText (g, t, { cx, y, 216, 12 }, sans (11.f, true).withExtraKerningFactor (0.14f), sub); };
+        auto label = [&] (const juce::String& t, int y) { drawText (g, t, { cx, y, 216, 12 }, sans (14.f, true).withExtraKerningFactor (0.14f), sub); };
         label ("INPUT", 8); label ("START", 71); label ("LENGTH", 117);
 
         const float db = juce::Decibels::gainToDecibels (shown, -60.f);
@@ -1165,7 +1185,7 @@ struct RecPanel : juce::Component, juce::Timer
         g.saveState(); g.reduceClipRegion (bar.withWidth (bar.getWidth() * f).toNearestInt());
         g.setGradientFill (juce::ColourGradient (juce::Colour (0xff9bb36a), bar.getX(), 0.f, juce::Colour (0xffb5654f), bar.getRight(), 0.f, false));
         g.fillRoundedRectangle (bar, 4.f); g.restoreState();
-        drawText (g, db <= -59.f ? "-inf" : juce::String (juce::roundToInt (db)) + " dB", { cx + 172, 49, 44, 18 }, mono (11.f), sub, juce::Justification::centredRight);
+        drawText (g, db <= -59.f ? "-inf" : juce::String (juce::roundToInt (db)) + " dB", { cx + 172, 49, 44, 18 }, mono (14.f), sub, juce::Justification::centredRight);
 
         g.setColour (juce::Colour (0xf0241710));
         for (auto* c : std::initializer_list<juce::Component*> { &input, &start, &length, &cancel }) g.fillRoundedRectangle (c->getBounds().toFloat(), 4.f);
@@ -1251,11 +1271,19 @@ struct Liner : juce::Component, juce::FileDragAndDropTarget
         }
         tabs[0].setToggleState (true, juce::dontSendNotification);
         less.setButtonText ("-"); more.setButtonText ("+");
-        less.setTooltip ("Fewer steps in this lane"); more.setTooltip ("More steps in this lane");
+        less.setTooltip ("Fewer steps, in every lane of this track"); more.setTooltip ("More steps, in every lane of this track");
+        less.setTitle ("Fewer steps"); more.setTitle ("More steps");
+        randBtn.setButtonText ("Randomize"); randBtn.setTooltip ("Roll new random steps for this lane only. The other lanes stay as they are.");
+        clearLaneBtn.setButtonText ("Clear lane"); clearLaneBtn.setTooltip ("Put every step of this lane back to plain.");
+        clearAllBtn.setButtonText ("Clear all"); clearAllBtn.setTooltip ("Put every step of every lane on this track back to plain.");
+        randBtn.onClick = [this] { proc.randomizeLane (track, grid.laneIndex()); grid.repaint(); };
+        clearLaneBtn.onClick = [this] { proc.resetLane (track, grid.laneIndex()); grid.repaint(); };
+        clearAllBtn.onClick = [this] { proc.clearTrackLanes (track); grid.repaint(); };
+        for (auto* b : { &randBtn, &clearLaneBtn, &clearAllBtn }) addAndMakeVisible (*b);
         less.onClick = [this] { nudgeLength (-1); };
         more.onClick = [this] { nudgeLength (1); };
         addAndMakeVisible (less); addAndMakeVisible (more);
-        grid.onChanged = [this] { repaint (506, 262, 170, 34); };
+        grid.onChanged = [this] { repaint (546, 196, 130, 34); };
 
         wave.onPick = [this] (int r) { pick (r); };
         setTrack (0);
@@ -1266,8 +1294,10 @@ struct Liner : juce::Component, juce::FileDragAndDropTarget
     void nudgeLength (int d)
     {
         const int lane = grid.laneIndex();
-        setNorm (proc, jd::laneLenId (track, lane), (float) juce::jlimit (1, jd::kSteps, proc.laneLength (track, lane) + d));
-        repaint (506, 262, 170, 34);
+        const int len = juce::jlimit (1, jd::kSteps, proc.laneLength (track, lane) + d);
+        for (int ln = 0; ln < jd::kLanes; ++ln) setNorm (proc, jd::laneLenId (track, ln), (float) len);     // one count for every lane
+        grid.repaint();
+        repaint();
     }
 
     void openKeyMenu()
@@ -1358,9 +1388,10 @@ struct Liner : juce::Component, juce::FileDragAndDropTarget
     {
         track = t;
         wTune = std::make_unique<Watch> (proc.state, jd::trackId (t, "tune"), *this);
-        tuneKnob = std::make_unique<Knob> (proc.state, jd::trackId (t, "tune"), "Tune", 22);
+        tuneKnob = std::make_unique<Knob> (proc.state, jd::trackId (t, "tune"), "Tune", 30);
         tuneKnob->showText = false;
         tuneKnob->slider.setTooltip ("Tune this whole track up or down in semitones. Match sets it for you.");
+        tuneKnob->setBounds (356, 27, 40, 34);
         addAndMakeVisible (*tuneKnob);
         recOpen = proc.catchState() != Proc::CatchIdle && proc.catchTrack() == t;
         rec.setTrack (t);
@@ -1403,12 +1434,12 @@ struct Liner : juce::Component, juce::FileDragAndDropTarget
         if (selected >= regionCount()) pick (regionCount() - 1);
         if (loaded && tag == nullptr) buildTag();
         if (! loaded) tag.reset();
-        for (auto* c : std::initializer_list<juce::Component*> { &wave, &grid, &clear, &less, &more, &tabs[0], &tabs[1], &tabs[2], &tabs[3], &tabs[4], &tabs[5], &tabs[6], &tabs[7], &tabs[8], &keyBtn, &matchBtn, &matchAllBtn, &laneBtn, tuneKnob.get() })
+        for (auto* c : std::initializer_list<juce::Component*> { &wave, &grid, &clear, &less, &more, &tabs[0], &tabs[1], &tabs[2], &tabs[3], &tabs[4], &tabs[5], &tabs[6], &tabs[7], &tabs[8], &keyBtn, &matchBtn, &matchAllBtn, &laneBtn, &randBtn, &clearLaneBtn, &clearAllBtn, tuneKnob.get() })
             if (c != nullptr) c->setVisible (loaded);
         keyBtn.setButtonText (keyButtonText());
         matchBtn.setEnabled (loaded && proc.trackKey (track).found);
         wave.setVisible (loaded && ! recOpen);
-        for (auto* c : std::initializer_list<juce::Component*> { &grid, &less, &more, &tabs[0], &tabs[1], &tabs[2], &tabs[3], &tabs[4], &tabs[5], &tabs[6], &tabs[7], &tabs[8], &laneBtn })
+        for (auto* c : std::initializer_list<juce::Component*> { &grid, &less, &more, &tabs[0], &tabs[1], &tabs[2], &tabs[3], &tabs[4], &tabs[5], &tabs[6], &tabs[7], &tabs[8], &laneBtn, &randBtn, &clearLaneBtn, &clearAllBtn })
             c->setVisible (loaded && ! recOpen);
         rec.setVisible (recOpen);
         record.setToggleState (recOpen, juce::dontSendNotification);
@@ -1426,17 +1457,20 @@ struct Liner : juce::Component, juce::FileDragAndDropTarget
         clear.setBounds (16 + 656 - 56, 12, 56, 28);
         browse.setBounds (loaded ? 16 + 656 - 56 - 8 - 64 : getWidth() / 2 - 128, loaded ? 12 : 268, loaded ? 64 : 120, 28);
         record.setBounds (loaded ? 16 + 656 - 56 - 8 - 64 - 8 - 64 : getWidth() / 2 + 8, loaded ? 12 : 268, loaded ? 64 : 120, 28);
-        keyBtn.setBounds (292, 6, 104, 24);
-        matchAllBtn.setBounds (402, 6, 62, 24);
-        matchBtn.setBounds (292, 32, 58, 22);
-        if (tuneKnob != nullptr) tuneKnob->setBounds (356, 30, 30, 26);
-        wave.setBounds (16, 56, 656, 164);
+        keyBtn.setBounds (292, 4, 104, 22);
+        matchAllBtn.setBounds (402, 4, 62, 22);
+        matchBtn.setBounds (292, 31, 58, 22);
+        if (tuneKnob != nullptr) tuneKnob->setBounds (356, 27, 40, 34);
+        wave.setBounds (16, 62, 656, 134);
         rec.setBounds (16, 56, 656, 204);
         int x = 16;
-        const int w[] = { 52, 52, 44, 52, 58, 50, 50, 50, 36 };
-        for (int i = 0; i < jd::kLanes; ++i) { tabs[(size_t) i].setBounds (x, 228, w[i], 24); x += w[i] + 5; }
-        less.setBounds (552, 228, 24, 24);
-        more.setBounds (610, 228, 24, 24);
+        const int w[] = { 56, 60, 46, 62, 70, 54, 58, 54, 38 };
+        for (int i = 0; i < jd::kLanes; ++i) { tabs[(size_t) i].setBounds (x, 202, w[i], 24); x += w[i] + 4; }
+        less.setBounds (594, 202, 22, 24);
+        more.setBounds (648, 202, 22, 24);
+        randBtn.setBounds (16, 232, 96, 24);
+        clearLaneBtn.setBounds (118, 232, 90, 24);
+        clearAllBtn.setBounds (214, 232, 78, 24);
         grid.setBounds (16, 262, 656, 146);
         laneBtn.setBounds (16, 262 + 44, 52, 22);
         if (tag != nullptr) tag->setBounds (getWidth() - 216 - 12, 10, 216, 406);
@@ -1451,14 +1485,14 @@ struct Liner : juce::Component, juce::FileDragAndDropTarget
         g.setColour (juce::Colour (0x99281608));
         g.drawRect (r, 1.f);
 
-        padBehind (g, { &laneBtn, &keyBtn, &matchAllBtn, &matchBtn, &browse, &record, &clear, &tabs[0], &tabs[1], &tabs[2], &tabs[3], &tabs[4], &tabs[5], &tabs[6], &tabs[7], &tabs[8], &less, &more });
+        padBehind (g, { &laneBtn, &keyBtn, &matchAllBtn, &matchBtn, &browse, &record, &clear, &randBtn, &clearLaneBtn, &clearAllBtn, &tabs[0], &tabs[1], &tabs[2], &tabs[3], &tabs[4], &tabs[5], &tabs[6], &tabs[7], &tabs[8], &less, &more });
 
         auto td = proc.getTrack (track);
         if (td == nullptr && ! recOpen)
         {
             drawText (g, "Nothing in here yet.", getLocalBounds().withHeight (200).withY (80), serif (26.f, false), ink, juce::Justification::centred);
             drawText (g, "Drop something in.", getLocalBounds().withHeight (30).withY (200), sans (14.f), ink.withAlpha (0.8f), juce::Justification::centred);
-            drawText (g, "WAV, AIFF, FLAC, MP3 and Ogg all fit.", getLocalBounds().withHeight (20).withY (312), sans (12.f), ink.withAlpha (0.65f), juce::Justification::centred);
+            drawText (g, "WAV, AIFF, FLAC, MP3 and Ogg all fit.", getLocalBounds().withHeight (20).withY (312), sans (14.f), ink.withAlpha (0.9f), juce::Justification::centred);
         }
         else if (td != nullptr)
         {
@@ -1467,20 +1501,18 @@ struct Liner : juce::Component, juce::FileDragAndDropTarget
             const auto k = td->key;
             const auto keyPart = k.found ? jd::keyText (k) + (k.confidence >= 0.5f ? ", likely" : ", maybe") : juce::String ("no clear key");
             drawText (g, seconds (td->seconds()) + "  " + dot + "  " + juce::String (regionCount()) + (regionCount() == 1 ? " region" : " regions") + "  " + dot + "  " + keyPart,
-                      { 16, 32, 272, 16 }, sans (11.f), ink.withAlpha (0.75f));
+                      { 16, 32, 272, 16 }, sans (14.f), ink.withAlpha (0.75f));
             const float tune = plainValue (proc, jd::trackId (track, "tune"));
-            drawText (g, "Tune", { 392, 31, 72, 12 }, sans (11.f, true), ink.withAlpha (0.85f));
-            drawText (g, (tune > 0.05f ? "+" : "") + juce::String (tune, 1) + " st", { 392, 42, 72, 12 }, mono (11.f), ink);
+            drawText (g, "Tune", { 398, 28, 70, 16 }, sans (13.f, true), ink.withAlpha (0.9f));
+            drawText (g, (tune > 0.05f ? "+" : "") + juce::String (tune, 1) + " st", { 398, 43, 70, 16 }, mono (13.f), ink);
             if (! recOpen)
             {
-            drawText (g, "Steps", { 512, 228, 38, 24 }, sans (11.f, true), ink.withAlpha (0.85f), juce::Justification::centredRight);
-            drawText (g, juce::String (proc.laneLength (track, grid.laneIndex())), { 578, 228, 30, 24 }, mono (13.f, true), ink, juce::Justification::centred);
-            const int feel = juce::jlimit (0, 2, juce::roundToInt (plainValue (proc, "seq_feel")));
-            drawText (g, jd::kStepDivs[juce::jlimit (0, 3, juce::roundToInt (plainValue (proc, "seq_div")))] + (feel == 1 ? "d" : feel == 2 ? "t" : ""), { 636, 228, 36, 24 }, mono (11.f), ink.withAlpha (0.8f), juce::Justification::centredRight);
+            drawText (g, "Steps", { 550, 202, 42, 24 }, sans (13.f, true), ink.withAlpha (0.9f), juce::Justification::centredRight);
+            drawText (g, juce::String (proc.laneLength (track, grid.laneIndex())), { 616, 202, 32, 24 }, mono (14.f, true), ink, juce::Justification::centred);
             }
         }
         if (message.isNotEmpty())
-            drawText (g, message, { 16, td == nullptr ? 350 : 409, 656, 16 }, sans (12.f), juce::Colour (0xff7a2e16), td == nullptr ? juce::Justification::centred : juce::Justification::centredLeft);
+            drawText (g, message, { 16, td == nullptr ? 350 : 409, 656, 16 }, sans (14.f), juce::Colour (0xff7a2e16), td == nullptr ? juce::Justification::centred : juce::Justification::centredLeft);
     }
 
     bool isInterestedInFileDrag (const juce::StringArray& files) override { return files.size() > 0 && isSupported (juce::File (files[0])); }
@@ -1508,7 +1540,7 @@ struct Liner : juce::Component, juce::FileDragAndDropTarget
     StepGrid grid;
     std::unique_ptr<RegionTag> tag;
     std::array<juce::TextButton, jd::kLanes> tabs;
-    juce::TextButton browse, clear, record, less, more, keyBtn, matchBtn, matchAllBtn, laneBtn;
+    juce::TextButton browse, clear, record, less, more, keyBtn, matchBtn, matchAllBtn, laneBtn, randBtn, clearLaneBtn, clearAllBtn;
     Proc::LaneCopy clip;
     std::unique_ptr<Knob> tuneKnob;
     std::unique_ptr<Watch> wTune, wRoot, wMode;
@@ -1599,7 +1631,7 @@ struct TuneDial : juce::Component, juce::SettableTooltipClient, juce::ChangeList
             g.setColour (ink);
             g.drawLine ({ pt (a, f - 3.f), pt (a, f - (big ? 11.f : 7.f)) }, big ? 1.5f : 1.f);
             if (big)
-                drawText (g, juce::String (i * 2), juce::Rectangle<int> (22, 14).withCentre (pt (a, f - 21.f).toInt()), sans (11.f, true), ink, juce::Justification::centred);
+                drawText (g, juce::String (i * 2), juce::Rectangle<int> (22, 14).withCentre (pt (a, f - 21.f).toInt()), sans (14.f, true), ink, juce::Justification::centred);
         }
         // red pointer on the rim for the current station
         const int cur = proc.currentDrawer();
@@ -1630,7 +1662,7 @@ struct TuneDial : juce::Component, juce::SettableTooltipClient, juce::ChangeList
 };
 
 // The junk compartment: the pattern card, the regions card and the brass nameplate.
-struct Junk : juce::Component
+struct Junk : juce::Component, private juce::Timer
 {
     explicit Junk (Proc& p) : proc (p)
     {
@@ -1641,10 +1673,22 @@ struct Junk : juce::Component
         feel->setTooltip ("Straight, dotted (1.5 times longer) or triplet (three in the space of two)");
         swing = std::make_unique<Knob> (s, "m_swing", "Swing", 38, juce::Colour (0xff2a1b10), juce::Colour (0xff5a4329));
         tempo = std::make_unique<Knob> (s, "seq_bpm", "Tempo", 38, juce::Colour (0xff2a1b10), juce::Colour (0xff5a4329));
-        tempo->slider.setTooltip ("Only used when there is no host, such as the standalone app");
-        run.setButtonText ("Run"); run.setClickingTogglesState (true);
-        run.setTooltip ("Runs the pattern without a host. In a DAW the host's play button drives it.");
+        tempo->slider.setTooltip ("The speed when the pattern plays on its own. While your DAW plays, the DAW's tempo is used.");
+        tempo->textOverride = [this]
+        {
+            const double h = proc.hostTempo();
+            return h > 0.0 && followsHost() ? juce::String (h, 1) + " BPM" : juce::String (plainValue (proc, "seq_bpm"), 1) + " BPM";
+        };
+        tempoFrom = std::make_unique<Seg> (s, "seq_hostbpm", juce::StringArray { "DAW", "Own" }, true);
+        tempoFrom->setTooltip ("DAW: use the DAW's tempo even when you start the pattern here. Own: use the Tempo knob. While the DAW is playing, its tempo always wins. The standalone app has no DAW, so it uses the knob.");
+        run.setButtonText ("Play"); run.setClickingTogglesState (true);
+        run.setTooltip ("Starts and pauses the pattern here, without the DAW's play button. Press again to pause; Play picks up where it stopped.");
         runAtt = std::make_unique<juce::ButtonParameterAttachment> (*s.getParameter ("seq_run"), run, nullptr);
+        restart.setButtonText ("Restart");
+        restart.setTooltip ("Go back to step 1. (While the DAW plays, the pattern follows the DAW's position.)");
+        restart.onClick = [this] { proc.restartPattern(); };
+        run.setTitle ("Play or pause the pattern"); restart.setTitle ("Restart the pattern from step 1");
+        startTimerHz (4);
         snap = std::make_unique<Seg> (s, "snap", juce::StringArray { "Off", "Hit", "Zero" });
         rummage.setButtonText ("Scan"); rummage.setTooltip ("Scan the dial: re-roll every step on this track, except the lanes you keep");
         shakeBtn.setButtonText ("Shake");  shakeBtn.setTooltip ("Shake the dial: re-roll only some of the steps. The Amount knob sets how many.");
@@ -1674,7 +1718,7 @@ struct Junk : juce::Component
         sub.onClick = [this] { proc.removeRegion (track); };
         play.onClick = [this] { proc.auditionWhole (track); };
         stop.onClick = [this] { proc.stopAudition (track); };
-        for (auto* c : std::initializer_list<juce::Component*> { div.get(), feel.get(), swing.get(), tempo.get(), &run, snap.get(), &sliceEq, &sliceHit, &add, &sub, &play, &stop }) addAndMakeVisible (*c);
+        for (auto* c : std::initializer_list<juce::Component*> { div.get(), feel.get(), swing.get(), tempo.get(), tempoFrom.get(), &run, &restart, snap.get(), &sliceEq, &sliceHit, &add, &sub, &play, &stop }) addAndMakeVisible (*c);
         dial = std::make_unique<TuneDial> (proc);
         addAndMakeVisible (*dial);
         setTrack (0);
@@ -1691,8 +1735,8 @@ struct Junk : juce::Component
         addAndMakeVisible (*morphKnob);
         wSendD = std::make_unique<Watch> (proc.state, jd::trackId (t, "senddel"), *this);
         wSendR = std::make_unique<Watch> (proc.state, jd::trackId (t, "sendrev"), *this);
-        sendDelKnob = std::make_unique<Knob> (proc.state, jd::trackId (t, "senddel"), "Delay", 26, juce::Colour (0xff2a1b10), juce::Colour (0xff5a4329));
-        sendRevKnob = std::make_unique<Knob> (proc.state, jd::trackId (t, "sendrev"), "Reverb", 26, juce::Colour (0xff2a1b10), juce::Colour (0xff5a4329));
+        sendDelKnob = std::make_unique<Knob> (proc.state, jd::trackId (t, "senddel"), "Delay", 40, juce::Colour (0xff2a1b10), juce::Colour (0xff5a4329));
+        sendRevKnob = std::make_unique<Knob> (proc.state, jd::trackId (t, "sendrev"), "Reverb", 40, juce::Colour (0xff2a1b10), juce::Colour (0xff5a4329));
         sendDelKnob->showText = false; sendRevKnob->showText = false;
         sendDelKnob->slider.setTooltip ("How much of this track goes to the Delay. It uses the Delay settings on the Master page.");
         sendRevKnob->slider.setTooltip ("How much of this track goes to the Reverb. It uses the Reverb settings on the Master page.");
@@ -1704,11 +1748,13 @@ struct Junk : juce::Component
     void resized() override
     {
         // pattern card at (14,14), regions card at (236,14); both 214 x 222
-        div->setBounds (14 + 16, 14 + 36, 182, 24);
-        feel->setBounds (14 + 16, 14 + 64, 182, 24);
-        swing->setBounds (14 + 20, 14 + 96, 76, 76);
-        tempo->setBounds (14 + 118, 14 + 96, 76, 76);
+        div->setBounds (14 + 16, 14 + 34, 182, 24);
+        feel->setBounds (14 + 16, 14 + 60, 182, 24);
+        swing->setBounds (14 + 20, 14 + 88, 76, 72);
+        tempo->setBounds (14 + 118, 14 + 88, 76, 72);
+        tempoFrom->setBounds (14 + 116, 14 + 160, 86, 20);
         run.setBounds (14 + 16, 14 + 184, 86, 28);
+        restart.setBounds (14 + 110, 14 + 184, 86, 28);
 
         const int kx = 458 + 16;
         rummage.setBounds (kx, 14 + 34, 88, 26);
@@ -1725,8 +1771,8 @@ struct Junk : juce::Component
         snap->setBounds (rx + 16, 14 + 116, 150, 26);
         if (morphKnob != nullptr) morphKnob->setBounds (rx + 54, 14 + 148, 30, 26);
         dial->setBounds (706, 6, 172, 172);
-        if (sendDelKnob != nullptr) sendDelKnob->setBounds (688, 190, 38, 36);
-        if (sendRevKnob != nullptr) sendRevKnob->setBounds (792, 190, 38, 36);
+        if (sendDelKnob != nullptr) sendDelKnob->setBounds (684, 186, 48, 48);
+        if (sendRevKnob != nullptr) sendRevKnob->setBounds (792, 186, 48, 48);
         play.setBounds (rx, 14 + 184, 88, 26);
         stop.setBounds (rx + 94, 14 + 184, 88, 26);
     }
@@ -1735,7 +1781,7 @@ struct Junk : juce::Component
     {
         g.setColour (juce::Colour (0x66000000)); g.fillRoundedRectangle (r.translated (0.f, 4.f), 3.f);
         g.setColour (cream()); g.fillRoundedRectangle (r, 3.f);
-        drawText (g, title, { (int) r.getX() + 16, (int) r.getY() + 12, (int) r.getWidth() - 32, 16 }, sans (11.f, true).withExtraKerningFactor (0.16f), juce::Colour (0xff5a4329));
+        drawText (g, title, { (int) r.getX() + 16, (int) r.getY() + 12, (int) r.getWidth() - 32, 16 }, sans (14.f, true).withExtraKerningFactor (0.16f), juce::Colour (0xff5a4329));
     }
 
     void paint (juce::Graphics& g) override
@@ -1745,19 +1791,19 @@ struct Junk : juce::Component
         card (g, { 14.f, 14.f, 212.f, 222.f }, "PATTERN");
         card (g, { 236.f, 14.f, 212.f, 222.f }, "REGIONS");
         card (g, { 458.f, 14.f, 212.f, 222.f }, "SCAN");
-        drawText (g, "Keep these lanes", { 458 + 16, 14 + 148, 182, 16 }, sans (11.f, true), juce::Colour (0xff5a4329));
-        drawText (g, "Morph", { 236 + 16, 14 + 150, 50, 22 }, sans (11.f, true), juce::Colour (0xff5a4329));
-        drawText (g, juce::String (juce::roundToInt (plainValue (proc, jd::trackId (track, "morph")) * 100.f)) + "%", { 236 + 16 + 98, 14 + 150, 60, 22 }, mono (11.f), juce::Colour (0xff5a4329));
-        padBehind (g, { &rummage, &shakeBtn, &keep[0], &keep[1], &keep[2], &keep[3], &keep[4], &keep[5], div.get(), feel.get(), &run, snap.get(), &sliceEq, &sliceHit, &add, &sub, &play, &stop });
-        drawText (g, "Snap edges to", { 236 + 16, 14 + 96, 182, 18 }, sans (11.f, true), juce::Colour (0xff5a4329));
+        drawText (g, "Keep these lanes", { 458 + 16, 14 + 148, 182, 16 }, sans (14.f, true), juce::Colour (0xff5a4329));
+        drawText (g, "Morph", { 236 + 16, 14 + 150, 50, 22 }, sans (14.f, true), juce::Colour (0xff5a4329));
+        drawText (g, juce::String (juce::roundToInt (plainValue (proc, jd::trackId (track, "morph")) * 100.f)) + "%", { 236 + 16 + 98, 14 + 150, 60, 22 }, mono (14.f), juce::Colour (0xff5a4329));
+        padBehind (g, { &restart, tempoFrom.get(), &rummage, &shakeBtn, &keep[0], &keep[1], &keep[2], &keep[3], &keep[4], &keep[5], div.get(), feel.get(), &run, snap.get(), &sliceEq, &sliceHit, &add, &sub, &play, &stop });
+        drawText (g, "Snap edges to", { 236 + 16, 14 + 96, 182, 18 }, sans (14.f, true), juce::Colour (0xff5a4329));
 
         const auto warm = juce::Colour (0xfff0d9a8);
         for (int k = 0; k < 2; ++k)
         {
-            const int lx = (k == 0 ? 688 : 792) + 40;
+            const int lx = (k == 0 ? 684 : 792) + 50;
             const float v = plainValue (proc, jd::trackId (track, k == 0 ? "senddel" : "sendrev"));
-            drawText (g, k == 0 ? "Delay" : "Reverb", { lx, 190, 60, 16 }, sans (11.f, true), warm);
-            drawText (g, juce::String (juce::roundToInt (v * 100.f)) + "%", { lx, 207, 60, 16 }, mono (11.f), warm.withAlpha (0.75f));
+            drawText (g, k == 0 ? "Delay" : "Reverb", { lx, 192, 62, 18 }, sans (13.f, true), warm);
+            drawText (g, juce::String (juce::roundToInt (v * 100.f)) + "%", { lx, 211, 62, 18 }, mono (13.f), warm.withAlpha (0.8f));
         }
 
     }
@@ -1771,8 +1817,19 @@ struct Junk : juce::Component
     juce::TextButton rummage, shakeBtn;
     std::array<juce::TextButton, jd::kRolled> keep;
     std::array<std::unique_ptr<juce::ButtonParameterAttachment>, jd::kRolled> keepAtt;
-    juce::TextButton run, sliceEq, sliceHit, add, sub, play, stop;
+    juce::TextButton run, restart, sliceEq, sliceHit, add, sub, play, stop;
     std::unique_ptr<juce::ButtonParameterAttachment> runAtt;
+    std::unique_ptr<Seg> tempoFrom;
+    bool followsHost() const { return plainValue (proc, "seq_hostbpm") > 0.5f; }
+    void timerCallback() override
+    {
+        const juce::String want = plainValue (proc, "seq_run") > 0.5f ? "Pause" : "Play";
+        if (run.getButtonText() != want) run.setButtonText (want);
+        const double shown = proc.hostTempo() > 0.0 && followsHost() ? proc.hostTempo() : (double) plainValue (proc, "seq_bpm");
+        if (std::abs (shown - lastTempoShown) > 0.04) { lastTempoShown = shown; tempo->repaint(); }
+        tempo->setAlpha (proc.hostTempo() > 0.0 && followsHost() ? 0.6f : 1.f);
+    }
+    double lastTempoShown = 0.0;
 };
 } // namespace
 
@@ -1792,15 +1849,16 @@ struct JunkDrawerEditor::DrawerPage : juce::Component, juce::ChangeListener
             press->valueText = [this] { return proc.armedLfo() == index ? juce::String ("assigning") : juce::String ("off"); };
             press->onPress = [this] { proc.setArmedLfo (proc.armedLfo() == index ? -1 : index); press->invalidateAccessibilityHandler(); };
             addAndMakeVisible (*press);
+            startTimerHz (15);
         }
         void resized() override { press->setBounds (getLocalBounds()); }
         std::unique_ptr<ui::FocusProxy> press;
         void mouseDown (const juce::MouseEvent&) override { proc.setArmedLfo (proc.armedLfo() == index ? -1 : index); }
 
         // A small dot at the right edge rides this LFO's live value.  Cheap: 15 Hz, only while shown, off with Reduce motion.
-        void visibilityChanged() override { if (isShowing()) startTimerHz (15); else stopTimer(); }
         void timerCallback() override
         {
+            if (! ui::shown (*this)) return;
             if ((bool) state.state.getProperty ("reduceMotion", false)) { if (dot != 0.f) { dot = 0.f; repaint(); } return; }
             const float v = juce::jlimit (-1.f, 1.f, proc.lfoValue (index));
             if (std::abs (v - dot) > 0.01f) { dot = v; repaint(); }
@@ -1820,7 +1878,7 @@ struct JunkDrawerEditor::DrawerPage : juce::Component, juce::ChangeListener
             const int sync  = juce::roundToInt (state.getRawParameterValue (jd::lfoId (index, "sync"))->load());
             const float hz  = state.getRawParameterValue (jd::lfoId (index, "rate"))->load();
             const int div   = juce::roundToInt (state.getRawParameterValue (jd::lfoId (index, "div"))->load());
-            drawText (g, "L" + juce::String (index + 1), { 8, 3, 30, 16 }, mono (12.f, true), pal::text);
+            drawText (g, "L" + juce::String (index + 1), { 8, 3, 30, 16 }, mono (14.f, true), pal::text);
             if (auto* mc = currentMod())
             {
                 int n = 0;
@@ -1829,7 +1887,7 @@ struct JunkDrawerEditor::DrawerPage : juce::Component, juce::ChangeListener
                 {
                     const auto b = juce::Rectangle<float> ((float) getWidth() - 24.f, 5.f, 16.f, 16.f);
                     g.setColour (juce::Colour (0xfff0b25a)); g.fillEllipse (b);
-                    drawText (g, juce::String (n), b.toNearestInt(), mono (11.f, true), juce::Colour (0xff2a1b10), juce::Justification::centred);
+                    drawText (g, juce::String (n), b.toNearestInt(), mono (14.f, true), juce::Colour (0xff2a1b10), juce::Justification::centred);
                 }
             }
             if (dot != 0.f)
@@ -1843,7 +1901,7 @@ struct JunkDrawerEditor::DrawerPage : juce::Component, juce::ChangeListener
             g.strokePath (wave, juce::PathStrokeType (1.6f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded), juce::AffineTransform::translation (10.f, 20.f));
 
             const juce::String rate = sync == 0 ? juce::String (hz, hz < 10.f ? 2 : 1) + "Hz" : jd::kLfoSyncsShort (div, sync);
-            drawText (g, jd::kLfoShapes[shape].toLowerCase() + " " + rate, { 8, 34, getWidth() - 12, 14 }, sans (11.f, true), pal::textSoft);
+            drawText (g, jd::kLfoShapes[shape].toLowerCase() + " " + rate, { 8, 34, getWidth() - 12, 14 }, sans (14.f, true), pal::textSoft);
         }
 
         int index;
@@ -1891,10 +1949,11 @@ struct JunkDrawerEditor::DrawerPage : juce::Component, juce::ChangeListener
                 return true;
             };
             addAndMakeVisible (*fader);
+            startTimerHz (4);
         }
-        void visibilityChanged() override { if (isShowing()) startTimerHz (4); else stopTimer(); }
         void timerCallback() override
         {
+            if (! ui::shown (*this)) return;
             juce::int64 h = 7;
             for (int k = 0; k < jd::kSteps; ++k) h = h * 31 + juce::roundToInt (proc.state.getRawParameterValue (jd::stepId (track, k, jd::LaneRegion))->load());
             h = h * 31 + proc.laneLength (track, jd::LaneRegion);
@@ -1928,9 +1987,9 @@ struct JunkDrawerEditor::DrawerPage : juce::Component, juce::ChangeListener
             g.drawRoundedRectangle (r.reduced (0.5f), 3.f, picked || highContrast() ? 2.f : 1.f);
 
             const juce::Rectangle<float> badge (10.f, 10.f, 28.f, 28.f);
-            g.setGradientFill (highContrast() ? juce::ColourGradient (juce::Colours::white, 14.f, 14.f, juce::Colour (0xffe0e0e0), 34.f, 36.f, true) : juce::ColourGradient (juce::Colour (0xfff3dc98), 14.f, 14.f, juce::Colour (0xff6d4e1d), 34.f, 36.f, true));
+            g.setGradientFill (highContrast() ? juce::ColourGradient (juce::Colours::white, 14.f, 14.f, juce::Colour (0xffe0e0e0), 34.f, 36.f, true) : juce::ColourGradient (juce::Colour (0xfff3dc98), 14.f, 14.f, juce::Colour (0xffb98f3c), 34.f, 36.f, true));
             g.fillEllipse (badge);
-            drawText (g, juce::String (track + 1).paddedLeft ('0', 2), badge.toNearestInt(), mono (12.f, true), juce::Colour (0xff2a1b10), juce::Justification::centred);
+            drawText (g, juce::String (track + 1).paddedLeft ('0', 2), badge.toNearestInt(), mono (14.f, true), juce::Colour (0xff2a1b10), juce::Justification::centred);
 
             auto td = proc.getTrack (track);
             const juce::Rectangle<float> card (46.f, 10.f, 150.f, 26.f);
@@ -1955,7 +2014,7 @@ struct JunkDrawerEditor::DrawerPage : juce::Component, juce::ChangeListener
                 }
             }
             else
-                drawText (g, "Nothing in here yet.", { 46, 46, 200, 20 }, sans (12.f), juce::Colour (0xffd9c39a));
+                drawText (g, "Nothing in here yet.", { 46, 46, 200, 20 }, sans (14.f), juce::Colour (0xffd9c39a));
             // level fader
             g.setColour (juce::Colour (0x99000000));
             g.fillRoundedRectangle (252.f, 12.f, 8.f, 56.f, 3.f);
@@ -2017,7 +2076,7 @@ struct JunkDrawerEditor::DrawerPage : juce::Component, juce::ChangeListener
     {
         liner->setBounds (328, 122, 908, 426);
         junk->setBounds (328, 560, 908, 250);
-        out->setBounds (62, 32, 58, 62);
+        out->setBounds (62, 28, 58, 70);
         for (int i = 0; i < 4; ++i) pills[(size_t) i].setBounds (180 + i * 68, 34, 62, 24);
         for (int i = 0; i < jd::kLfos; ++i) tiles[(size_t) i]->setBounds (520 + i * 118, 34, 112, 52);
         for (int t = 0; t < jd::kTracks; ++t)
@@ -2032,7 +2091,7 @@ struct JunkDrawerEditor::DrawerPage : juce::Component, juce::ChangeListener
         drawStripLabel (g, "OUTPUT", 62, 16);
         g.setColour (pal::line); g.fillRect (150, 22, 1, 62);
         drawStripLabel (g, "EFFECTS", 180, 16);
-        drawText (g, "Details on the Master page", { 180, 66, 260, 16 }, sans (11.f), pal::textDim);
+        drawText (g, "Details on the Master page", { 180, 66, 260, 16 }, sans (14.f), pal::textDim);
         g.setColour (pal::line); g.fillRect (470, 22, 1, 62);
         drawStripLabel (g, "LFOS", 520, 16);
 
@@ -2064,7 +2123,7 @@ struct JunkDrawerEditor::LfoPage : juce::Component, juce::ChangeListener
             polar = std::make_unique<Seg> (s, jd::lfoId (i, "polar"), jd::kLfoPolarity);
             const char* ids[]   = { "rate", "depth", "phase", "fade" };
             const char* names[] = { "Rate", "Depth", "Phase", "Fade in" };
-            for (int k = 0; k < 4; ++k) knobs[(size_t) k] = std::make_unique<Knob> (s, jd::lfoId (i, ids[k]), names[k], 38);
+            for (int k = 0; k < 4; ++k) knobs[(size_t) k] = std::make_unique<Knob> (s, jd::lfoId (i, ids[k]), names[k], 48);
             addAndMakeVisible (*scope); addAndMakeVisible (*shapes); addAndMakeVisible (*sync); addAndMakeVisible (*polar);
             for (auto& k : knobs) addAndMakeVisible (*k);
         }
@@ -2072,14 +2131,14 @@ struct JunkDrawerEditor::LfoPage : juce::Component, juce::ChangeListener
         {
             scope->setBounds (getWidth() - 14 - 156, 13, 156, 22);
             shapes->setBounds (14, 44, getWidth() - 28, 26);
-            for (int k = 0; k < 4; ++k) knobs[(size_t) k]->setBounds (14 + k * 90, 176, 90, 76);
+            for (int k = 0; k < 4; ++k) knobs[(size_t) k]->setBounds (14 + k * 90, 156, 90, 98);
             sync->setBounds (14, 262, getWidth() - 28 - 120, 24);
             polar->setBounds (getWidth() - 14 - 104, 262, 104, 24);
         }
         void paint (juce::Graphics& g) override
         {
             Panel::paint (g);
-            const juce::Rectangle<float> sc (14.f, 80.f, (float) getWidth() - 28.f, 84.f);
+            const juce::Rectangle<float> sc (14.f, 80.f, (float) getWidth() - 28.f, 70.f);
             paintGlass (g, sc);
             g.setColour (juce::Colour (0x26ffd9a0));
             g.drawHorizontalLine ((int) sc.getCentreY(), sc.getX(), sc.getRight());
@@ -2144,7 +2203,7 @@ struct JunkDrawerEditor::LfoPage : juce::Component, juce::ChangeListener
         drawStripLabel (g, "ASSIGN", 66, 26);
         g.setColour (pal::line); g.fillRect (390, 24, 1, 56);
         g.setColour (pal::textSoft);
-        g.setFont (sans (12.f));
+        g.setFont (sans (17.f));
         g.drawFittedText ("Pick an LFO, then drag any knob on any page up or down to set the amount. Pick it again to stop.", { 410, 28, 440, 52 }, juce::Justification::centredLeft, 3, 1.f);
     }
 
@@ -2166,7 +2225,7 @@ struct JunkDrawerEditor::MasterPage : juce::Component
             Kind kind; const char* title; const char* on; const char* mode; juce::StringArray modes;
             std::array<const char*, 4> knobs; const char* optLabel; const char* opt; juce::StringArray opts;
         };
-        FxCard (APVTS& s, const Cfg& c) : Panel (c.title, false), cfg (c), state (s)
+        FxCard (APVTS& s, JunkDrawerProcessor& p, const Cfg& c) : Panel (c.title, false), cfg (c), state (s), proc (p)
         {
             power = std::make_unique<Seg> (s, c.on, juce::StringArray { "On", "Bypass" }, true);
             power->setTooltip ("Bypass this effect");
@@ -2176,12 +2235,35 @@ struct JunkDrawerEditor::MasterPage : juce::Component
             for (size_t k = 0; k < 4; ++k)
             {
                 auto* p = s.getParameter (c.knobs[k]);
-                knobs[k] = std::make_unique<Knob> (s, c.knobs[k], p->getName (64), 38);
+                knobs[k] = std::make_unique<Knob> (s, c.knobs[k], p->getName (64), 52);
                 addAndMakeVisible (*knobs[k]);
                 watch.push_back (std::make_unique<Watch> (s, c.knobs[k], *this));
             }
             watch.push_back (std::make_unique<Watch> (s, c.mode, *this));
             watch.push_back (std::make_unique<Watch> (s, c.on, *this));
+            if (c.kind == Delay)
+            {
+                // in the synced modes the Time knob picks a note length, so it reads in beats, not milliseconds
+                knobs[0]->textOverride = [this]
+                {
+                    const int mode = juce::roundToInt (v ("fx_delay_mode"));
+                    if (mode == 0) return state.getParameter ("fx_delay_time")->getCurrentValueAsText();
+                    const double beatMs = 60000.0 / juce::jmax (20.0, proc.lastBpm());
+                    static const double divs[] = { 0.125, 0.25, 0.5, 1.0, 2.0, 4.0 };
+                    double best = divs[0], bd = 1.0e9;
+                    for (double d : divs) { const double e = std::abs (std::log (v ("fx_delay_time") / (d * beatMs))); if (e < bd) { bd = e; best = d; } }
+                    best *= mode == 2 ? 1.5 : (mode == 3 ? 2.0 / 3.0 : 1.0);
+                    return beatsText (best);
+                };
+            }
+        }
+        static juce::String beatsText (double b)
+        {
+            struct F { double v; const char* t; };
+            static const F f[] = { { 1.0 / 12, "1/12" }, { 1.0 / 8, "1/8" }, { 1.0 / 6, "1/6" }, { 3.0 / 16, "3/16" }, { 0.25, "1/4" }, { 1.0 / 3, "1/3" }, { 0.375, "3/8" },
+                                   { 0.5, "1/2" }, { 2.0 / 3, "2/3" }, { 0.75, "3/4" }, { 1.0, "1" }, { 4.0 / 3, "4/3" }, { 1.5, "3/2" }, { 2.0, "2" }, { 8.0 / 3, "8/3" }, { 3.0, "3" }, { 4.0, "4" }, { 6.0, "6" } };
+            for (auto& x : f) if (std::abs (x.v - b) < 1.0e-6) return juce::String (x.t) + (b > 1.001 ? " beats" : " beat");
+            return juce::String (b, 2) + " beats";
         }
         float v (const char* id) const { return state.getRawParameterValue (id)->load(); }
         float n (const char* id) const { return state.getParameter (id)->convertTo0to1 (v (id)); }
@@ -2190,7 +2272,7 @@ struct JunkDrawerEditor::MasterPage : juce::Component
         {
             power->setBounds (getWidth() - 14 - 112, 13, 112, 22);
             modes->setBounds (14, 44, getWidth() - 28, 26);
-            for (size_t k = 0; k < 4; ++k) knobs[k]->setBounds (14 + (int) k * 90, 176, 90, 76);
+            for (size_t k = 0; k < 4; ++k) knobs[k]->setBounds (14 + (int) k * 90, 156, 90, 98);
             const int ow = opts->idealWidth();
             opts->setBounds (getWidth() - 14 - ow, 262, ow, 24);
         }
@@ -2200,7 +2282,7 @@ struct JunkDrawerEditor::MasterPage : juce::Component
             highlighted = false;
             Panel::paint (g);
             const bool on = v (cfg.on) > 0.5f;
-            const juce::Rectangle<float> vz (14.f, 80.f, (float) getWidth() - 28.f, 84.f);
+            const juce::Rectangle<float> vz (14.f, 80.f, (float) getWidth() - 28.f, 70.f);
             paintGlass (g, vz);
             g.setColour (juce::Colour (0x26ffd9a0));
             g.drawHorizontalLine ((int) vz.getCentreY(), vz.getX(), vz.getRight());
@@ -2269,7 +2351,7 @@ struct JunkDrawerEditor::MasterPage : juce::Component
             if (fill) { g.setColour ((on ? pal::amber : juce::Colour (0xffb5a37c)).withAlpha (0.14f)); g.fillPath (p, juce::AffineTransform::translation (vz.getX(), vz.getY())); g.setColour (on ? pal::amber : juce::Colour (0xffb5a37c)); }
             g.strokePath (p, juce::PathStrokeType (2.f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded), juce::AffineTransform::translation (vz.getX(), vz.getY()));
 
-            drawText (g, cfg.optLabel, { 14, 262, 120, 24 }, sans (11.f, true).withExtraKerningFactor (0.12f), pal::textDim);
+            drawText (g, cfg.optLabel, { 14, 262, 120, 24 }, sans (15.f, true).withExtraKerningFactor (0.12f), pal::textDim);
             const juce::String prefix = juce::String (cfg.on).upToLastOccurrenceOf ("_on", false, false) + "_";
             drawHooked (g, 14, 296, getWidth() - 28, [prefix] (const LinkInfo& l) { return l.target.startsWith (prefix); },
                         [] (const LinkInfo& l) { return "L" + juce::String (l.lfo + 1) + " " + l.name.fromLastOccurrenceOf (" " + juce::String::charToString (0x00b7) + " ", false, false); });
@@ -2277,6 +2359,7 @@ struct JunkDrawerEditor::MasterPage : juce::Component
 
         Cfg cfg;
         APVTS& state;
+        JunkDrawerProcessor& proc;
         std::unique_ptr<Seg> power, modes, opts;
         std::array<std::unique_ptr<Knob>, 4> knobs;
         std::vector<std::unique_ptr<Watch>> watch;
@@ -2289,7 +2372,7 @@ struct JunkDrawerEditor::MasterPage : juce::Component
             const char* ids[]   = { "m_volume", "m_pan", "m_pitch", "m_rate", "m_swing", "m_width" };
             const char* names[] = { "Volume", "Pan", "Pitch", "Rate", "Swing", "Width" };
             const char* notes[] = { "Output level", "Left to right", "All tracks", "Step speed", "Off-beat delay", "Stereo spread" };
-            for (int k = 0; k < 6; ++k) { knobs[(size_t) k] = std::make_unique<Knob> (s, ids[k], names[k], 56, pal::text, pal::amber, notes[k]); addAndMakeVisible (*knobs[(size_t) k]); }
+            for (int k = 0; k < 6; ++k) { knobs[(size_t) k] = std::make_unique<Knob> (s, ids[k], names[k], 64, pal::text, pal::amber, notes[k]); addAndMakeVisible (*knobs[(size_t) k]); }
             range = std::make_unique<Seg> (s, "m_pitchrange", juce::StringArray { juce::String (juce::CharPointer_UTF8 ("\xc2\xb1" "12")), juce::String (juce::CharPointer_UTF8 ("\xc2\xb1" "24")), juce::String (juce::CharPointer_UTF8 ("\xc2\xb1" "48")) });
             rate = std::make_unique<Seg> (s, "m_ratemode", juce::StringArray { "Free", "Sync" });
             addAndMakeVisible (*range); addAndMakeVisible (*rate);
@@ -2316,7 +2399,7 @@ struct JunkDrawerEditor::MasterPage : juce::Component
             Panel::paint (g);
             const float peak = std::max (drawnL, drawnR);
             const float pdb = juce::Decibels::gainToDecibels (peak, -60.f);
-            drawText (g, pdb <= -59.f ? juce::String ("Peak -inf") : "Peak " + juce::String (pdb, 1) + " dB", { getWidth() - 14 - 140, 12, 140, 24 }, mono (11.f), pal::amber, juce::Justification::centredRight);
+            drawText (g, pdb <= -59.f ? juce::String ("Peak -inf") : "Peak " + juce::String (pdb, 1) + " dB", { getWidth() - 14 - 140, 12, 140, 24 }, mono (16.f), pal::amber, juce::Justification::centredRight);
 
             const juce::Rectangle<float> a (256.f + 22.f, 50.f, 22.f, 440.f), b (256.f + 50.f, 50.f, 22.f, 440.f);
             for (auto& bar : { a, b })
@@ -2340,13 +2423,13 @@ struct JunkDrawerEditor::MasterPage : juce::Component
                 const float y = 50.f + dbToY ((float) m);
                 g.setColour (juce::Colour (0x66f0e2c4));
                 g.drawHorizontalLine ((int) y, 256.f + 78.f, 256.f + 86.f);
-                drawText (g, juce::String (m), { 256 + 90, (int) y - 7, 34, 14 }, mono (11.f), pal::textDim);
+                drawText (g, juce::String (m), { 256 + 90, (int) y - 7, 34, 14 }, mono (16.f), pal::textDim);
             }
 
             g.setColour (pal::line.withAlpha (0.6f));
             g.fillRect (14, 520, getWidth() - 28, 1);
-            drawText (g, "PITCH RANGE", { 14, 536, 140, 24 }, sans (11.f, true).withExtraKerningFactor (0.12f), pal::textDim);
-            drawText (g, "RATE", { 14, 576, 140, 24 }, sans (11.f, true).withExtraKerningFactor (0.12f), pal::textDim);
+            drawText (g, "PITCH RANGE", { 14, 536, 140, 24 }, sans (15.f, true).withExtraKerningFactor (0.12f), pal::textDim);
+            drawText (g, "RATE", { 14, 576, 140, 24 }, sans (15.f, true).withExtraKerningFactor (0.12f), pal::textDim);
             drawHooked (g, 14, 640, getWidth() - 28, [] (const LinkInfo& l) { return l.target.startsWith ("m_"); },
                         [] (const LinkInfo& l) { return "L" + juce::String (l.lfo + 1) + " " + l.name.fromLastOccurrenceOf (" " + juce::String::charToString (0x00b7) + " ", false, false); });
         }
@@ -2367,7 +2450,7 @@ struct JunkDrawerEditor::MasterPage : juce::Component
             { FxCard::Reverb,  "Reverb",  "fx_reverb_on", "fx_reverb_mode", { "Room", "Hall", "Plate", "Spring" }, { "fx_reverb_size", "fx_reverb_decay", "fx_reverb_damp", "fx_reverb_mix" }, "PRE-DELAY", "fx_reverb_pre", { "0 ms", "20 ms", "40 ms" } },
             { FxCard::Limiter, "Limiter", "fx_lim_on",    "fx_lim_mode", { "Soft", "Hard" }, { "fx_lim_ceiling", "fx_lim_release", "fx_lim_input", "fx_lim_mix" }, "LOOKAHEAD", "fx_lim_look", { "Off", "1 ms", "5 ms" } }
         };
-        for (size_t i = 0; i < 4; ++i) { cards[i] = std::make_unique<FxCard> (s, cfgs[i]); addAndMakeVisible (*cards[i]); }
+        for (size_t i = 0; i < 4; ++i) { cards[i] = std::make_unique<FxCard> (s, ed.proc, cfgs[i]); addAndMakeVisible (*cards[i]); }
 
         bypass.setButtonText ("Bypass all");
         bypass.setTooltip ("Switch every effect off");
@@ -2401,7 +2484,7 @@ struct JunkDrawerEditor::MasterPage : juce::Component
         drawText (g, "Master and effects", { 66, 40, 320, 32 }, serif (22.f), juce::Colour (0xfff6e8c9));
         g.setColour (pal::line); g.fillRect (390, 24, 1, 56);
         g.setColour (pal::textSoft);
-        g.setFont (sans (12.f));
+        g.setFont (sans (17.f));
         g.drawFittedText ("Every knob here takes an LFO too. Pick one on the LFOs page, click a knob, then drag up or down to set the amount.", { 410, 28, 440, 52 }, juce::Justification::centredLeft, 3, 1.f);
     }
     JunkDrawerEditor& ed;
@@ -2416,6 +2499,7 @@ struct JunkDrawerEditor::SongPage : juce::Component, juce::ChangeListener, juce:
 {
     explicit SongPage (JunkDrawerEditor& e) : ed (e)
     {
+        startTimerHz (8);
         chain.setButtonText ("Chain");
         chain.setClickingTogglesState (true);
         chain.setTooltip ("On: the chain below plays pattern after pattern. Off: the pattern you are editing just loops.");
@@ -2426,9 +2510,9 @@ struct JunkDrawerEditor::SongPage : juce::Component, juce::ChangeListener, juce:
     ~SongPage() override { ed.proc.removeChangeListener (this); }
 
     void changeListenerCallback (juce::ChangeBroadcaster*) override { repaint(); }
-    void visibilityChanged() override { if (isVisible()) startTimerHz (8); else stopTimer(); }
     void timerCallback() override
     {
+        if (! ui::shown (*this)) return;
         const int pl = ed.proc.playingPattern(), ps = ed.proc.chainPosition();
         if (pl != shownPlaying || ps != shownSlot) { shownPlaying = pl; shownSlot = ps; repaint(); }
     }
@@ -2483,31 +2567,31 @@ struct JunkDrawerEditor::SongPage : juce::Component, juce::ChangeListener, juce:
         drawText (g, "Song", { 66, 40, 320, 32 }, serif (22.f), juce::Colour (0xfff6e8c9));
         g.setColour (pal::line); g.fillRect (390, 24, 1, 56);
         g.setColour (pal::textSoft);
-        g.setFont (sans (12.f));
+        g.setFont (sans (17.f));
         g.drawFittedText ("Click a pattern to edit it. Build a chain below and turn Chain on; the pattern changes on the bar line.", { 410, 28, 560, 52 }, juce::Justification::centredLeft, 3, 1.f);
 
         const int editing = ed.proc.editPattern(), playing = ed.proc.playingPattern(), slotNow = ed.proc.chainPosition();
         panel ({ 44.f, 122.f, 1192.f, 190.f });
-        drawText (g, "PATTERNS", { 58, 134, 200, 24 }, mono (15.f, true), pal::text);
+        drawText (g, "PATTERNS", { 58, 134, 200, 24 }, mono (17.f, true), pal::text);
         for (int i = 0; i < jd::kPatterns; ++i)
         {
             const auto r = patRect (i);
-            const bool ed_ = i == editing, pl = i == playing && ed.proc.state.getRawParameterValue ("seq_run")->load() > 0.5f;
+            const bool ed_ = i == editing, pl = i == playing && ed.proc.isPlaying();
             g.setColour (ed_ ? pal::amber.withAlpha (0.18f) : juce::Colours::white.withAlpha (0.04f));
             g.fillRoundedRectangle (r.toFloat(), 4.f);
             g.setColour (ed_ ? pal::amber : pal::line);
             g.drawRoundedRectangle (r.toFloat().reduced (0.5f), 4.f, ed_ ? 1.5f : 1.f);
             drawText (g, letter (i), r.withTrimmedBottom (40).withTrimmedTop (10), serif (44.f), ed_ ? pal::amber : pal::text, juce::Justification::centred);
-            drawText (g, ed_ ? "Editing" : "Click to edit", r.withTop (r.getBottom() - 32).reduced (8, 0), sans (11.f, ed_), ed_ ? pal::amber : pal::textDim, juce::Justification::centred);
+            drawText (g, ed_ ? "Editing" : "Click to edit", r.withTop (r.getBottom() - 32).reduced (8, 0), sans (16.f, ed_), ed_ ? pal::amber : pal::textDim, juce::Justification::centred);
             if (pl) { g.setColour (pal::amber); g.fillEllipse ((float) r.getRight() - 16.f, (float) r.getY() + 8.f, 8.f, 8.f); }
         }
 
         panel ({ 44.f, 330.f, 1192.f, 340.f });
-        drawText (g, "CHAIN", { 58, 342, 200, 24 }, mono (15.f, true), pal::text);
+        drawText (g, "CHAIN", { 58, 342, 200, 24 }, mono (17.f, true), pal::text);
         const int n = ed.proc.chainLength();
         int total = 0;
         for (int i = 0; i < n; ++i) total += ed.proc.chainBars (i);
-        drawText (g, n == 0 ? juce::String ("Empty") : juce::String (n) + (n == 1 ? " slot, " : " slots, ") + barsText (total), { 700, 342, 522, 24 }, mono (11.f), pal::amber, juce::Justification::centredRight);
+        drawText (g, n == 0 ? juce::String ("Empty") : juce::String (n) + (n == 1 ? " slot, " : " slots, ") + barsText (total), { 700, 342, 522, 24 }, mono (16.f), pal::amber, juce::Justification::centredRight);
         for (int i = 0; i <= n && i < jd::kChainMax; ++i)
         {
             const auto r = slotRect (i);
@@ -2518,7 +2602,7 @@ struct JunkDrawerEditor::SongPage : juce::Component, juce::ChangeListener, juce:
                 juce::Path p; p.addRoundedRectangle (r.toFloat().reduced (0.5f), 4.f);
                 juce::PathStrokeType (1.f).createDashedStroke (p, p, dash, 2);
                 g.fillPath (p);
-                drawText (g, "+ Add", r, sans (13.f, true), pal::textDim, juce::Justification::centred);
+                drawText (g, "+ Add", r, sans (17.f, true), pal::textDim, juce::Justification::centred);
                 continue;
             }
             const bool now = i == slotNow;
@@ -2526,11 +2610,11 @@ struct JunkDrawerEditor::SongPage : juce::Component, juce::ChangeListener, juce:
             g.fillRoundedRectangle (r.toFloat(), 4.f);
             g.setColour (now ? pal::amber : pal::line);
             g.drawRoundedRectangle (r.toFloat().reduced (0.5f), 4.f, now ? 1.5f : 1.f);
-            drawText (g, juce::String (i + 1), { r.getX() + 10, r.getY() + 8, 40, 16 }, mono (11.f), pal::textDim);
+            drawText (g, juce::String (i + 1), { r.getX() + 10, r.getY() + 8, 40, 16 }, mono (16.f), pal::textDim);
             drawText (g, letter (ed.proc.chainPattern (i)), r.withTrimmedTop (18).withTrimmedBottom (34), serif (38.f), now ? pal::amber : pal::text, juce::Justification::centred);
-            drawText (g, barsText (ed.proc.chainBars (i)), r.withTop (r.getBottom() - 32).reduced (8, 0), sans (11.f), pal::textSoft, juce::Justification::centred);
+            drawText (g, barsText (ed.proc.chainBars (i)), r.withTop (r.getBottom() - 32).reduced (8, 0), sans (16.f), pal::textSoft, juce::Justification::centred);
         }
-        drawText (g, "Click a slot to change its pattern or length, or remove it. Export follows the chain when it is on.", { 58, 630, 1164, 24 }, sans (11.f), pal::textDim);
+        drawText (g, "Click a slot to change its pattern or length, or remove it. Export follows the chain when it is on.", { 58, 630, 1164, 24 }, sans (16.f), pal::textDim);
     }
 
     JunkDrawerEditor& ed;
@@ -2547,7 +2631,7 @@ struct JunkDrawerEditor::MatrixPage : juce::Component, juce::ChangeListener
     struct Table : juce::Component
     {
         explicit Table (MatrixPage& m) : owner (m) {}
-        static constexpr int rowH = 44, barX = 478, barW = 168;
+        static constexpr int rowH = 46, barX = 478, barW = 168;
 
         std::vector<LinkInfo> rows() const
         {
@@ -2562,7 +2646,7 @@ struct JunkDrawerEditor::MatrixPage : juce::Component, juce::ChangeListener
             if (list.empty())
             {
                 drawText (g, hookedNone(), getLocalBounds().withHeight (60).withY (150), serif (22.f, false), pal::textSoft, juce::Justification::centred);
-                drawText (g, "Pick an LFO, then drag any knob up or down.", getLocalBounds().withHeight (24).withY (214), sans (13.f), pal::textDim, juce::Justification::centred);
+                drawText (g, "Pick an LFO, then drag any knob up or down.", getLocalBounds().withHeight (24).withY (214), sans (17.f), pal::textDim, juce::Justification::centred);
                 return;
             }
             auto& state = owner.ed.proc.state;
@@ -2571,11 +2655,11 @@ struct JunkDrawerEditor::MatrixPage : juce::Component, juce::ChangeListener
                 const auto& l = list[i];
                 const int y = (int) i * rowH;
                 g.setColour (juce::Colour (0x1af0e2c4)); g.fillRect (0, y + rowH - 1, getWidth(), 1);
-                drawText (g, l.name, { 0, y + 4, 306, 20 }, sans (13.f, true), pal::text);
-                drawText (g, l.where, { 0, y + 23, 306, 16 }, sans (11.f), pal::textDim);
+                drawText (g, l.name, { 0, y + 4, 306, 20 }, sans (17.f, true), pal::text);
+                drawText (g, l.where, { 0, y + 23, 306, 16 }, sans (16.f), pal::textDim);
                 drawChip (g, { 316, y + 11, 40, 22 }, "L" + juce::String (l.lfo + 1));
                 const bool perTrack = state.getRawParameterValue (jd::lfoId (l.lfo, "global"))->load() < 0.5f && l.target.startsWithChar ('t') && juce::CharacterFunctions::isDigit (l.target[1]);
-                drawText (g, perTrack ? "Per track" : "Global", { 364, y + 11, 100, 22 }, sans (11.f), pal::textSoft);
+                drawText (g, perTrack ? "Per track" : "Global", { 364, y + 11, 100, 22 }, sans (16.f), pal::textSoft);
 
                 const juce::Rectangle<float> bar ((float) barX, (float) y + 17.f, (float) barW, 10.f);
                 g.setColour (juce::Colour (0x80000000)); g.fillRoundedRectangle (bar, 5.f);
@@ -2585,8 +2669,8 @@ struct JunkDrawerEditor::MatrixPage : juce::Component, juce::ChangeListener
                 g.fillRoundedRectangle (l.amount >= 0.f ? bar.getCentreX() : bar.getCentreX() - w, bar.getY(), juce::jmax (2.f, w), bar.getHeight(), 5.f);
                 g.setColour (pal::textDim); g.fillRect (bar.getCentreX() - 1.f, bar.getY() - 3.f, 2.f, bar.getHeight() + 6.f);
                 const int pct = juce::roundToInt (l.amount * 100.f);
-                drawText (g, (pct > 0 ? "+" : "") + juce::String (pct) + "%", { barX + barW + 8, y + 11, 56, 22 }, mono (12.f), pal::amber, juce::Justification::centredRight);
-                drawText (g, juce::roundToInt (state.getRawParameterValue (jd::lfoId (l.lfo, "polar"))->load()) == 0 ? "Uni" : "Bi", { 740, y + 11, 50, 22 }, mono (11.f), pal::textSoft);
+                drawText (g, (pct > 0 ? "+" : "") + juce::String (pct) + "%", { barX + barW + 8, y + 11, 56, 22 }, mono (17.f), pal::amber, juce::Justification::centredRight);
+                drawText (g, juce::roundToInt (state.getRawParameterValue (jd::lfoId (l.lfo, "polar"))->load()) == 0 ? "Uni" : "Bi", { 712, y + 11, 50, 22 }, mono (16.f), pal::textSoft);
 
                 const juce::Rectangle<float> x ((float) getWidth() - 28.f, (float) y + 9.f, 26.f, 26.f);
                 g.setColour (pal::line); g.drawEllipse (x.reduced (0.5f), 1.f);
@@ -2666,7 +2750,7 @@ struct JunkDrawerEditor::MatrixPage : juce::Component, juce::ChangeListener
         drawText (g, "Matrix", { 66, 40, 320, 32 }, serif (22.f), juce::Colour (0xfff6e8c9));
         g.setColour (pal::line); g.fillRect (390, 24, 1, 56);
         g.setColour (pal::textSoft);
-        g.setFont (sans (12.f));
+        g.setFont (sans (17.f));
         g.drawFittedText ("Every control with an LFO on it, in one list. Drag a bar to change how much, or clear it with the cross.", { 410, 28, 440, 52 }, juce::Justification::centredLeft, 3, 1.f);
 
         const auto links = currentMod() != nullptr ? currentMod()->links() : std::vector<LinkInfo>();
@@ -2676,19 +2760,19 @@ struct JunkDrawerEditor::MatrixPage : juce::Component, juce::ChangeListener
             g.setColour (juce::Colour (0x29ffebbe)); g.drawRoundedRectangle (r.reduced (0.5f), 4.f, 1.f);
         };
         panel ({ 44.f, 122.f, 892.f, 688.f });
-        drawText (g, "MATRIX", { 58, 134, 200, 24 }, mono (15.f, true), pal::text);
-        drawText (g, juce::String ((int) links.size()) + " hooked up", { 700, 134, 222, 24 }, mono (11.f), pal::amber, juce::Justification::centredRight);
-        drawText (g, "SHOW", { 58, 168, 50, 26 }, sans (11.f, true).withExtraKerningFactor (0.14f), pal::textDim);
+        drawText (g, "MATRIX", { 58, 134, 200, 24 }, mono (17.f, true), pal::text);
+        drawText (g, juce::String ((int) links.size()) + " hooked up", { 700, 134, 222, 24 }, mono (16.f), pal::amber, juce::Justification::centredRight);
+        drawText (g, "SHOW", { 58, 168, 50, 26 }, sans (15.f, true).withExtraKerningFactor (0.14f), pal::textDim);
         const char* heads[] = { "TARGET", "LFO", "AMOUNT", "POLARITY" };
-        const int hx[] = { 58, 374, 536, 798 };
-        for (int i = 0; i < 4; ++i) drawText (g, heads[i], { hx[i], 206, 160, 24 }, sans (11.f, true).withExtraKerningFactor (0.14f), pal::textDim);
-        drawText (g, "CLEAR", { 822, 206, 100, 24 }, sans (11.f, true).withExtraKerningFactor (0.14f), pal::textDim, juce::Justification::centredRight);
+        const int hx[] = { 58, 374, 536, 770 };
+        for (int i = 0; i < 4; ++i) drawText (g, heads[i], { hx[i], 206, 160, 24 }, sans (15.f, true).withExtraKerningFactor (0.14f), pal::textDim);
+        drawText (g, "CLEAR", { 822, 206, 100, 24 }, sans (15.f, true).withExtraKerningFactor (0.14f), pal::textDim, juce::Justification::centredRight);
         g.setColour (pal::line); g.fillRect (58, 230, 864, 1);
-        drawText (g, "Amounts run from -100% to +100% of the control's range.", { 58, 774, 864, 24 }, sans (11.f), pal::textDim);
+        drawText (g, "Amounts run from -100% to +100% of the control's range.", { 58, 774, 864, 24 }, sans (16.f), pal::textDim);
 
         // the six LFOs
         panel ({ 948.f, 122.f, 288.f, 338.f });
-        drawText (g, "LFOS", { 962, 134, 200, 24 }, mono (15.f, true), pal::text);
+        drawText (g, "LFOS", { 962, 134, 200, 24 }, mono (17.f, true), pal::text);
         static const char* full[] = { "Sine", "Triangle", "Saw", "Square", "Sample and hold", "Smooth random", "Drift" };
         auto& st = ed.proc.state;
         for (int i = 0; i < jd::kLfos; ++i)
@@ -2704,9 +2788,9 @@ struct JunkDrawerEditor::MatrixPage : juce::Component, juce::ChangeListener
             const juce::String rate = sync == 0 ? juce::String (hz, hz < 10.f ? 2 : 1) + " Hz" : jd::kLfoSyncsShort (div, sync);
             int n = 0;
             for (auto& l : links) if (l.lfo == i) ++n;
-            drawText (g, full[shape], { 1008, y + 6, 130, 18 }, sans (12.f, true), pal::text);
-            drawText (g, juce::String (global ? "Global" : "Per track") + " " + juce::String::charToString (0x00b7) + " " + rate, { 1008, y + 24, 140, 16 }, sans (11.f), pal::textDim);
-            drawText (g, juce::String (n) + " hooked", { 1140, y + 12, 82, 22 }, mono (11.f), pal::amber, juce::Justification::centredRight);
+            drawText (g, full[shape], { 1008, y + 6, 130, 18 }, sans (17.f, true), pal::text);
+            drawText (g, juce::String (global ? "Global" : "Per track") + " " + juce::String::charToString (0x00b7) + " " + rate, { 1008, y + 24, 140, 16 }, sans (16.f), pal::textDim);
+            drawText (g, juce::String (n) + " hooked", { 1140, y + 12, 82, 22 }, mono (16.f), pal::amber, juce::Justification::centredRight);
         }
 
         // how to hook one up
@@ -2714,22 +2798,22 @@ struct JunkDrawerEditor::MatrixPage : juce::Component, juce::ChangeListener
         g.setColour (juce::Colour (0x66000000)); g.fillRoundedRectangle (card.translated (0.f, 4.f), 3.f);
         g.setColour (cream()); g.fillRoundedRectangle (card, 3.f);
         const auto ink = juce::Colour (0xff2a1b10);
-        drawText (g, "HOOK ONE UP", { 968, 492, 248, 16 }, sans (11.f, true).withExtraKerningFactor (0.16f), juce::Colour (0xff5a4329));
+        drawText (g, "HOOK ONE UP", { 968, 492, 248, 16 }, sans (15.f, true).withExtraKerningFactor (0.16f), juce::Colour (0xff5a4329));
         const char* steps[] = { "Pick an LFO on the LFOs page, or click one in the top strip.", "Drag any knob up or down to set how much it moves.", "It lands in this list. Change the amount here or clear it." };
         for (int i = 0; i < 3; ++i)
         {
             const int y = 524 + i * 52;
             g.setGradientFill (juce::ColourGradient (juce::Colour (0xfff3dc98), 978.f, (float) y, juce::Colour (0xff8a6528), 996.f, (float) y + 22.f, true));
             g.fillEllipse (968.f, (float) y, 22.f, 22.f);
-            drawText (g, juce::String (i + 1), { 968, y, 22, 22 }, mono (11.f, true), ink, juce::Justification::centred);
-            g.setFont (sans (12.5f)); g.setColour (ink);
+            drawText (g, juce::String (i + 1), { 968, y, 22, 22 }, mono (16.f, true), ink, juce::Justification::centred);
+            g.setFont (sans (17.5f)); g.setColour (ink);
             g.drawFittedText (steps[i], { 1000, y - 4, 216, 44 }, juce::Justification::centredLeft, 3, 1.f);
         }
         if (links.empty())
         {
             g.setColour (juce::Colour (0x4d3c2814)); g.fillRect (968, 690, 248, 1);
-            drawText (g, "Nothing attached yet.", { 968, 700, 248, 20 }, mono (12.f), juce::Colour (0xff5a4329));
-            drawText (g, "Pick an LFO and hook it up.", { 968, 722, 248, 20 }, mono (12.f), juce::Colour (0xff5a4329));
+            drawText (g, "Nothing attached yet.", { 968, 700, 248, 20 }, mono (17.f), juce::Colour (0xff5a4329));
+            drawText (g, "Pick an LFO and hook it up.", { 968, 722, 248, 20 }, mono (17.f), juce::Colour (0xff5a4329));
         }
     }
 
@@ -2815,7 +2899,7 @@ struct ExportPanel : juce::Component, juce::Timer
         for (auto* c : std::initializer_list<PickSeg*> { &what, &lenKind, &fileKind, &bits, &rate, &ending, &norm }) c->onChange = [this] { readControls(); updateInfo(); };
 
         field.setJustification (juce::Justification::centred);
-        field.setFont (mono (13.f, true));
+        field.setFont (mono (19.f, true));
         field.setColour (juce::TextEditor::backgroundColourId, juce::Colour (0xfffffaf0));
         field.setColour (juce::TextEditor::textColourId, juce::Colour (0xff2a1b10));
         field.setColour (juce::TextEditor::outlineColourId, juce::Colour (0x00000000));
@@ -3052,22 +3136,22 @@ struct ExportPanel : juce::Component, juce::Timer
         g.setColour (cream()); g.fillRoundedRectangle (c.toFloat(), 6.f);
         g.setColour (juce::Colour (0x665a3c1e)); g.drawRoundedRectangle (c.toFloat().reduced (0.5f), 6.f, 1.f);
         drawText (g, "Export", { c.getX() + 28, c.getY() + 20, 400, 32 }, serif (26.f, false), ink);
-        drawText (g, "Plays the pattern offline, with the LFOs and effects moving the whole way.", { c.getX() + 28, c.getY() + 54, 584, 18 }, sans (12.f), sub);
+        drawText (g, "Plays the pattern offline, with the LFOs and effects moving the whole way.", { c.getX() + 28, c.getY() + 54, 584, 18 }, sans (19.f), sub);
 
         static const char* labels[] = { "WHAT", "LENGTH", "FILE TYPE", "BIT DEPTH", "SAMPLE RATE", "ENDING", "NORMALIZE", "FOLDER" };
         for (int i = 0; i < 8; ++i)
-            drawText (g, labels[i], { c.getX() + 28, c.getY() + 84 + i * 36 + 5, 108, 26 }, sans (11.f, true).withExtraKerningFactor (0.14f), sub);
+            drawText (g, labels[i], { c.getX() + 28, c.getY() + 84 + i * 36 + 5, 108, 26 }, sans (16.f, true).withExtraKerningFactor (0.14f), sub);
 
         g.setColour (juce::Colour (0xf0241710));
         for (auto* k : std::initializer_list<juce::Component*> { &what, &lenKind, &fileKind, &bits, &rate, &ending, &norm, &folderBtn, &cancel })
             g.fillRoundedRectangle (k->getBounds().toFloat(), 4.f);
         g.setColour (juce::Colour (0xfffffaf0)); g.fillRoundedRectangle (field.getBounds().toFloat(), 4.f);
 
-        drawText (g, lengthNote, { field.getRight() + 10, field.getY(), 472 - 280, 26 }, sans (12.f), sub);
+        drawText (g, lengthNote, { field.getRight() + 10, field.getY(), 472 - 280, 26 }, sans (19.f), sub);
 
         const int cx = c.getX() + 28 + 112, fy = c.getY() + 84 + 7 * 36 + 7;
         g.setColour (juce::Colour (0xffe6dab6)); g.fillRoundedRectangle ((float) cx, (float) fy, 472.f - 96.f, 26.f, 4.f);
-        drawText (g, folderLabel(), { cx + 10, fy, 472 - 96 - 20, 26 }, mono (11.f), ink);
+        drawText (g, folderLabel(), { cx + 10, fy, 472 - 96 - 20, 26 }, mono (18.f), ink);
 
         g.setColour (juce::Colour (0x40281608)); g.fillRect (c.getX() + 28, c.getBottom() - 22 - 32 - 14, 584, 1);
         const int by = c.getBottom() - 22 - 32;
@@ -3076,14 +3160,14 @@ struct ExportPanel : juce::Component, juce::Timer
             const juce::Rectangle<float> bar ((float) c.getX() + 28.f, (float) by + 11.f, 340.f, 10.f);
             g.setColour (juce::Colour (0xff3a2415)); g.fillRoundedRectangle (bar, 5.f);
             g.setColour (pal::amber); g.fillRoundedRectangle (bar.withWidth (juce::jmax (10.f, bar.getWidth() * job->progress.load())), 5.f);
-            drawText (g, juce::String (juce::roundToInt (job->progress.load() * 100.f)) + "%", { c.getX() + 28 + 350, by, 60, 32 }, mono (12.f, true), ink);
+            drawText (g, juce::String (juce::roundToInt (job->progress.load() * 100.f)) + "%", { c.getX() + 28 + 350, by, 60, 32 }, mono (19.f, true), ink);
         }
         else if (status.isNotEmpty())
-            drawText (g, status, { c.getX() + 28, by - 4, 340, 40 }, sans (12.f, true), statusOk ? juce::Colour (0xff3d5a22) : juce::Colour (0xff7a2e16), juce::Justification::centredLeft);
+            drawText (g, status, { c.getX() + 28, by - 4, 340, 40 }, sans (19.f, true), statusOk ? juce::Colour (0xff3d5a22) : juce::Colour (0xff7a2e16), juce::Justification::centredLeft);
         else
         {
-            drawText (g, info, { c.getX() + 28, by - 2, 340, 18 }, sans (12.f), sub);
-            drawText (g, "Each export gets its own dated folder.", { c.getX() + 28, by + 16, 340, 18 }, sans (12.f), sub);
+            drawText (g, info, { c.getX() + 28, by - 2, 340, 18 }, sans (19.f), sub);
+            drawText (g, "Each export gets its own dated folder.", { c.getX() + 28, by + 16, 340, 18 }, sans (19.f), sub);
         }
         go.setEnabled (canExport && ! running());
         if (! go.isEnabled() && ! done) { g.setColour (juce::Colour (0x66f3ead0)); }
@@ -3099,7 +3183,7 @@ struct ExportPanel : juce::Component, juce::Timer
             g.setColour (cream()); g.fillRoundedRectangle (r, 6.f);
             g.setColour (pal::brass); g.drawRoundedRectangle (r.reduced (1.f), 6.f, 2.f);
             drawText (g, "Where should exports go?", { 26, 20, getWidth() - 52, 30 }, serif (22.f, false), juce::Colour (0xff2a1b10));
-            g.setFont (sans (13.f)); g.setColour (juce::Colour (0xff4a3320));
+            g.setFont (sans (19.f)); g.setColour (juce::Colour (0xff4a3320));
             g.drawFittedText ("Pick a folder of your own, or let Rotary Dial save to a temporary folder. Each export gets its own dated sub-folder. You can change this any time with Change... in the Export window.",
                               juce::Rectangle<int> (26, 54, getWidth() - 52, 60), juce::Justification::topLeft, 3);
             g.setColour (juce::Colour (0xf0241710));
@@ -3154,11 +3238,19 @@ void JunkDrawerEditor::build()
 {
     header = std::make_unique<Header> (*this);
     drawerPage = std::make_unique<DrawerPage> (*this);
-    lfoPage = std::make_unique<LfoPage> (*this);
-    masterPage = std::make_unique<MasterPage> (*this);
-    matrixPage = std::make_unique<MatrixPage> (*this);
-    songPage = std::make_unique<SongPage> (*this);
-    exportOverlay = std::make_unique<ExportPanel> (proc);
+    {
+        ui::TextBoost big (4.f);                                  // these pages have room: bigger knobs labels, choices and buttons
+        lfoPage = std::make_unique<LfoPage> (*this);
+        masterPage = std::make_unique<MasterPage> (*this);
+        matrixPage = std::make_unique<MatrixPage> (*this);
+        songPage = std::make_unique<SongPage> (*this);
+    }
+    {
+        ui::TextBoost bigger (6.f);
+        exportOverlay = std::make_unique<ExportPanel> (proc);
+    }
+    for (auto* c : { (juce::Component*) lfoPage.get(), (juce::Component*) masterPage.get(), (juce::Component*) matrixPage.get(), (juce::Component*) songPage.get() }) ui::boostButtons (*c, 4.f);
+    ui::boostButtons (*exportOverlay, 6.f);
     aboutOverlay = std::make_unique<AboutPanel>();
     addAndMakeVisible (*header);
     for (juce::Component* c : { (juce::Component*) drawerPage.get(), (juce::Component*) lfoPage.get(), (juce::Component*) masterPage.get(), (juce::Component*) matrixPage.get(), (juce::Component*) songPage.get() })
@@ -3185,6 +3277,15 @@ void JunkDrawerEditor::setHighContrast (bool on)
     teardown();
     build();
     repaint();
+}
+
+bool JunkDrawerEditor::keyPressed (const juce::KeyPress& k)
+{
+    const auto m = k.getModifiers();
+    const auto ch = juce::CharacterFunctions::toUpperCase ((juce::juce_wchar) k.getKeyCode());
+    if (m.isCommandDown() && ch == 'Z') { if (m.isShiftDown()) proc.history().redo(); else proc.history().undo(); return true; }
+    if (m.isCommandDown() && ch == 'Y') { proc.history().redo(); return true; }
+    return false;
 }
 
 void JunkDrawerEditor::openAbout() { static_cast<AboutPanel&> (*aboutOverlay).open(); }

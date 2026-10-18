@@ -23,7 +23,7 @@ JunkDrawerProcessor::JunkDrawerProcessor()
     for (auto& a : chainBarsA) a.store (1);
     pVolume = state.getRawParameterValue ("m_volume");
     pPan    = state.getRawParameterValue ("m_pan");
-    pDiv = state.getRawParameterValue ("seq_div");   pFeel = state.getRawParameterValue ("seq_feel");   pBpm = state.getRawParameterValue ("seq_bpm");  pRun = state.getRawParameterValue ("seq_run");
+    pDiv = state.getRawParameterValue ("seq_div");   pFeel = state.getRawParameterValue ("seq_feel");   pBpm = state.getRawParameterValue ("seq_bpm");  pRun = state.getRawParameterValue ("seq_run");  pFollow = state.getRawParameterValue ("seq_hostbpm");
     for (int i = 0; i < jd::kLfos; ++i)
     {
         auto g = [&] (const char* s) { return state.getRawParameterValue (jd::lfoId (i, s)); };
@@ -47,6 +47,7 @@ JunkDrawerProcessor::JunkDrawerProcessor()
                                            g ("attack"), g ("decay"), g ("sustain"), g ("release"), g ("loop"), g ("reverse") };
         }
     }
+    undoHistory = std::make_unique<UndoHistory> (*this, juce::StringArray { "seq_run", "seq_hostbpm" });
 }
 
 JunkDrawerProcessor::~JunkDrawerProcessor()
@@ -288,27 +289,30 @@ void JunkDrawerProcessor::processBlock (juce::AudioBuffer<float>& buf, juce::Mid
         voices[(size_t) t].trigger (std::move (d), s, g, v (tp[(size_t) t].pan));
     }
 
-    // 2. transport: the host's position when it is playing, otherwise our own clock (standalone, or the Run switch)
+    // 2. transport: the host's position while it plays; otherwise our own clock (standalone, or the Run switch, which also works inside a DAW)
     bool running = false;
-    double ppq0 = 0.0, bpm = pBpm->load();
-    bool hostKnown = false;
+    double ppq0 = 0.0, bpm = pBpm->load(), hostBpm = 0.0;
+    bool hostPlaying = false;
     if (auto* ph = getPlayHead())
         if (auto pos = ph->getPosition())
         {
-            hostKnown = true;
             if (auto ts = pos->getTimeSignature()) beatsPerBar = juce::jmax (1.0, ts->numerator * 4.0 / juce::jmax (1, ts->denominator));
-            if (auto b = pos->getBpm()) bpm = *b;
+            if (auto b = pos->getBpm()) hostBpm = *b;
             if (pos->getIsPlaying())
             {
-                running = true;
+                hostPlaying = true;
                 if (auto p = pos->getPpqPosition()) ppq0 = *p; else ppq0 = internalPpq;
             }
         }
-    if (! hostKnown) { running = pRun->load() > 0.5f; ppq0 = internalPpq; }
+    if (hostBpm > 0.0 && (hostPlaying || pFollow->load() > 0.5f)) bpm = hostBpm;       // the host's tempo rules while it plays, and when asked to
+    if (restartReq.exchange (false)) internalPpq = 0.0;
+    if (hostPlaying) running = true;
+    else { running = pRun->load() > 0.5f; ppq0 = internalPpq; }
     if (ppq0 < 0.0) running = false;
+    hostBpmSeen.store (hostBpm, std::memory_order_relaxed);
     bpmSeen.store (bpm, std::memory_order_relaxed); barSeen.store (beatsPerBar, std::memory_order_relaxed);
     const double dppq = bpm / (60.0 * hostRate);
-    internalPpq = running ? internalPpq + dppq * n : 0.0;
+    internalPpq = hostPlaying ? ppq0 + dppq * n : (running ? internalPpq + dppq * n : internalPpq);      // paused keeps its place
     captureInput (buf, n, running, ppq0, dppq, bpm);              // the input is read here, then the buffer is cleared: nothing passes through
     updateModulation (n, running ? ppq0 : idleBeats, running, running && ! seqWasRunning, bpm);
     if (! running) idleBeats += dppq * n;
@@ -709,6 +713,31 @@ void JunkDrawerProcessor::rollSteps (int track, float chance)
         for (int s = 0; s < jd::kSteps; ++s)
             if (chance >= 1.f || rnd.nextFloat() < chance) setParam (state, jd::stepId (track, s, ln), rollStep (rnd, ln, regions));
     }
+    sendChangeMessage();
+}
+
+void JunkDrawerProcessor::randomizeLane (int track, int lane)
+{
+    if (track < 0 || track >= jd::kTracks || lane < 0 || lane >= jd::kLanes) return;
+    const int regions = juce::roundToInt (regCount[(size_t) track]->load());
+    if (lane == jd::LaneRegion && regions < 1) return;
+    juce::Random rnd;
+    for (int s = 0; s < jd::kSteps; ++s)
+    {
+        float v;
+        if (lane < jd::kRolled) v = rollStep (rnd, lane, regions);
+        else if (lane == jd::LaneProb) v = rnd.nextFloat() < 0.6f ? 1.f : std::round ((0.3f + 0.7f * rnd.nextFloat()) * 20.f) / 20.f;
+        else if (lane == jd::LaneTime) v = std::round ((rnd.nextFloat() - 0.5f) * 0.3f * 100.f) / 100.f;
+        else v = std::round ((rnd.nextFloat() * 1.2f - 0.6f) * 20.f) / 20.f;
+        setParam (state, jd::stepId (track, s, lane), v);
+    }
+    sendChangeMessage();
+}
+
+void JunkDrawerProcessor::clearTrackLanes (int track)
+{
+    if (track < 0 || track >= jd::kTracks) return;
+    for (int ln = 0; ln < jd::kLanes; ++ln) resetLane (track, ln);
     sendChangeMessage();
 }
 
@@ -1457,6 +1486,7 @@ void JunkDrawerProcessor::setStateInformation (const void* data, int size)
                 const juce::String path = node.getProperty ("t" + juce::String (t + 1)).toString();
                 if (path.isNotEmpty() && juce::File (path).existsAsFile()) loadFile (t, juce::File (path), false);   // the saved regions stay as they were
             }
+            if (undoHistory != nullptr) undoHistory->reset();
         }
 }
 

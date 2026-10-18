@@ -104,14 +104,18 @@ inline juce::Typeface::Ptr face (const char* data, int size)
 {
     return juce::Typeface::createSystemTypefaceFor (data, (size_t) size);
 }
+// Nothing is drawn smaller than 13 px: the old 11 and 12 px sizes read too small, so every small size is raised here, in one place.
+inline float bump (float h) { return h < 11.5f ? 13.f : (h < 13.5f ? 14.f : h); }
 inline juce::Font sans (float h, bool bold = false)
 {
+    h = bump (h);
     static auto reg = face (BinaryData::PlexSansRegular_ttf, BinaryData::PlexSansRegular_ttfSize);
     static auto semi = face (BinaryData::PlexSansSemiBold_ttf, BinaryData::PlexSansSemiBold_ttfSize);
     return juce::Font (juce::FontOptions (bold ? semi : reg).withHeight (h));
 }
 inline juce::Font mono (float h, bool bold = false)
 {
+    h = bump (h);
     static auto reg = face (BinaryData::PlexMonoRegular_ttf, BinaryData::PlexMonoRegular_ttfSize);
     static auto med = face (BinaryData::PlexMonoMedium_ttf, BinaryData::PlexMonoMedium_ttfSize);
     return juce::Font (juce::FontOptions (bold ? med : reg).withHeight (h));
@@ -130,6 +134,7 @@ inline juce::Font typewriter (float h)
 // Contrast audit hook, used only by the screenshot tool: records every label drawn, where and in what colour.
 struct TextAudit { juce::Rectangle<float> r; juce::Colour c; juce::String t; float h; };
 inline std::vector<TextAudit>*& auditSink() { static std::vector<TextAudit>* p = nullptr; return p; }
+inline std::vector<juce::String>*& overflowSink() { static std::vector<juce::String>* s = nullptr; return s; }   // test hook: text that does not fit its box
 inline bool& auditHideText() { static bool b = false; return b; }
 inline juce::Point<float>& auditOrigin() { static juce::Point<float> p; return p; }
 inline void auditNote (juce::Graphics&, const juce::String& t, juce::Rectangle<int> r, juce::Colour c, float h)
@@ -141,6 +146,8 @@ inline void drawText (juce::Graphics& g, const juce::String& t, juce::Rectangle<
                       juce::Justification j = juce::Justification::centredLeft)
 {
     auditNote (g, t, r, c, f.getHeight());
+    if (auto* o = overflowSink()) if (t.isNotEmpty() && (f.getStringWidthFloat (t) > (float) r.getWidth() + 0.5f || f.getHeight() > (float) r.getHeight() + 3.f))
+        o->push_back (t + "  (" + juce::String (juce::roundToInt (f.getStringWidthFloat (t))) + " px in " + juce::String (r.getWidth()) + " x " + juce::String (r.getHeight()) + ")");
     if (auditHideText()) return;
     g.setFont (f);
     g.setColour (c);
@@ -220,7 +227,7 @@ struct LookAndFeel : juce::LookAndFeel_V4
         if (s.hasKeyboardFocus (false)) paintFocus (g, b.expanded (4.f), 0.f, true);
     }
 
-    juce::Font getTextButtonFont (juce::TextButton&, int) override { return sans (12.f, true); }
+    juce::Font getTextButtonFont (juce::TextButton& b, int) override { return sans (12.f + (float) b.getProperties().getWithDefault ("boost", 0.f), true); }
 
     static bool onMint (const juce::Component& c) { return (bool) c.getProperties().getWithDefault ("mint", false); }
 
@@ -292,6 +299,29 @@ struct ModContext
     std::function<std::vector<int> (const juce::String&)> lfosOn;            // LFOs linked to a control
 };
 
+// Pages with room to spare (Master, LFOs, Matrix, Song, Export) draw their knobs, choices and buttons a few pixels larger.
+inline float& textBoost() { static float b = 0.f; return b; }
+struct TextBoost
+{
+    explicit TextBoost (float b) : old (textBoost()) { textBoost() = b; }
+    ~TextBoost() { textBoost() = old; }
+    float old;
+};
+// Marks every button under c to draw its label `b` px larger.
+inline void boostButtons (juce::Component& c, float b)
+{
+    if (dynamic_cast<juce::TextButton*> (&c) != nullptr) c.getProperties().set ("boost", b);
+    for (auto* ch : c.getChildren()) boostButtons (*ch, b);
+}
+
+// True when this component and everything above it is switched on (a hidden page is not): timers use it to skip their work.
+inline bool shown (const juce::Component& c)
+{
+    for (const juce::Component* x = &c; x != nullptr; x = x->getParentComponent())
+        if (! x->isVisible() && x->getParentComponent() != nullptr) return false;
+    return true;
+}
+
 //==============================================================================
 // A parameter knob: wood dial, name, and the value as the parameter prints it.
 // With an LFO armed, a drag on the knob sets how much that LFO moves it instead of changing the knob.
@@ -300,7 +330,7 @@ class Knob : public juce::Component, private juce::ChangeListener
 public:
     Knob (juce::AudioProcessorValueTreeState& s, const juce::String& id, const juce::String& label, int dialSize = 38,
           juce::Colour nameColour = pal::text, juce::Colour valueColour = pal::amber, juce::String note = {}, ModContext* modulation = nullptr)
-        : param (*s.getParameter (id)), paramId (id), size (dialSize), name (label), noteText (std::move (note)), nameCol (nameColour), valCol (valueColour), ctx (modulation != nullptr ? modulation : currentMod())
+        : param (*s.getParameter (id)), paramId (id), size (dialSize), name (label), noteText (std::move (note)), nameCol (nameColour), valCol (valueColour), ctx (modulation != nullptr ? modulation : currentMod()), boost (textBoost())
     {
         slider.setSliderStyle (juce::Slider::RotaryHorizontalVerticalDrag);
         slider.setTextBoxStyle (juce::Slider::NoTextBox, true, 0, 0);
@@ -344,15 +374,16 @@ public:
 
         if (! showText) return;
         auto r = getLocalBounds().withTrimmedTop (size + 6);
-        drawText (g, name, r.removeFromTop (14), sans (12.f, true), nameCol, juce::Justification::centred);
-        juce::String valueText = param.getCurrentValueAsText();
+        const int row = 14 + juce::roundToInt (boost * 1.6f);
+        drawText (g, name, r.removeFromTop (row), sans (12.f + boost, true), nameCol, juce::Justification::centred);
+        juce::String valueText = textOverride ? textOverride() : param.getCurrentValueAsText();
         if (armedLfo >= 0 && ! linked.empty() && std::find (linked.begin(), linked.end(), armedLfo) != linked.end())
         {
             const int pct = juce::roundToInt (ctx->amount (paramId, armedLfo) * 100.f);
             valueText = "L" + juce::String (armedLfo + 1) + " " + (pct > 0 ? "+" : "") + juce::String (pct) + "%";
         }
-        drawText (g, valueText, r.removeFromTop (14), mono (11.f), valCol, juce::Justification::centred);
-        if (noteText.isNotEmpty()) drawText (g, noteText, r.removeFromTop (14), sans (11.f), pal::textDim, juce::Justification::centred);
+        drawText (g, valueText, r.removeFromTop (row), mono (11.f + boost), valCol, juce::Justification::centred);
+        if (noteText.isNotEmpty()) drawText (g, noteText, r.removeFromTop (row), sans (11.f + boost), pal::textDim, juce::Justification::centred);
     }
 
     void mouseDown (const juce::MouseEvent& e) override
@@ -371,6 +402,7 @@ public:
 
     juce::Slider slider;
     bool showText = true;                                   // false: only the dial (the caller writes its own label)
+    std::function<juce::String()> textOverride;             // when set, prints the value instead of the parameter's own text
 
 private:
     bool assigning() const { return ctx != nullptr && ctx->armed() >= 0; }
@@ -389,6 +421,7 @@ private:
     juce::String name, noteText;
     juce::Colour nameCol, valCol;
     ModContext* ctx = nullptr;
+    float boost = 0.f;
     float startAmount = 0.f;
     int startY = 0;
     std::unique_ptr<juce::SliderParameterAttachment> attach;
@@ -400,7 +433,7 @@ class Seg : public juce::Component, public juce::SettableTooltipClient
 {
 public:
     Seg (juce::AudioProcessorValueTreeState& s, const juce::String& id, juce::StringArray items, bool boolOnFirst = false)
-        : labels (std::move (items)), invert (boolOnFirst), param (*s.getParameter (id)),
+        : labels (std::move (items)), boost (textBoost()), invert (boolOnFirst), param (*s.getParameter (id)),
           attach (param, [this] (float v) { idx = invert ? (v > 0.5f ? 0 : 1) : juce::roundToInt (v); repaint(); }, nullptr)
     {
         setTitle (param.getName (64));
@@ -442,7 +475,7 @@ public:
             auto cell = juce::Rectangle<int> (juce::roundToInt (r.getWidth() * i / n), 0, juce::roundToInt (r.getWidth() * (i + 1) / n) - juce::roundToInt (r.getWidth() * i / n), getHeight());
             const bool on = i == idx;
             if (on) { g.setColour (pal::amber); g.fillRoundedRectangle (cell.toFloat().reduced (1.f), 3.f); }
-            drawText (g, labels[i], cell.reduced (2, 0), sans (11.f, true), on ? pal::amberInk : pal::textSoft, juce::Justification::centred);
+            drawText (g, labels[i], cell.reduced (2, 0), sans (11.f + boost, true), on ? pal::amberInk : pal::textSoft, juce::Justification::centred);
         }
         if (hasKeyboardFocus (false)) paintFocus (g, r.reduced (1.f), 4.f);
     }
@@ -451,7 +484,7 @@ public:
     int idealWidth() const
     {
         int w = 0;
-        for (auto& l : labels) w += (int) std::ceil (sans (11.f, true).getStringWidthFloat (l)) + 24;
+        for (auto& l : labels) w += (int) std::ceil (sans (11.f + boost, true).getStringWidthFloat (l)) + 24;
         return w;
     }
 
@@ -463,6 +496,7 @@ public:
 
 private:
     juce::StringArray labels;
+    float boost = 0.f;
     bool invert;
     int idx = 0;
     juce::RangedAudioParameter& param;
@@ -474,7 +508,7 @@ private:
 class PickSeg : public juce::Component, public juce::SettableTooltipClient
 {
 public:
-    explicit PickSeg (juce::StringArray items, int initial = 0) : labels (std::move (items)), idx (initial) { setWantsKeyboardFocus (true); }
+    explicit PickSeg (juce::StringArray items, int initial = 0) : labels (std::move (items)), idx (initial), boost (textBoost()) { setWantsKeyboardFocus (true); }
     void focusGained (FocusChangeType) override { repaint(); }
     void focusLost (FocusChangeType) override { repaint(); }
     bool keyPressed (const juce::KeyPress& k) override
@@ -511,7 +545,7 @@ public:
             auto cell = juce::Rectangle<int> (juce::roundToInt (r.getWidth() * i / n), 0, juce::roundToInt (r.getWidth() * (i + 1) / n) - juce::roundToInt (r.getWidth() * i / n), getHeight());
             const bool on = i == idx;
             if (on) { g.setColour (pal::amber.withMultipliedAlpha (a)); g.fillRoundedRectangle (cell.toFloat().reduced (1.f), 3.f); }
-            drawText (g, labels[i], cell.reduced (2, 0), sans (11.f, true), (on ? pal::amberInk : pal::textSoft).withMultipliedAlpha (a), juce::Justification::centred);
+            drawText (g, labels[i], cell.reduced (2, 0), sans (11.f + boost, true), (on ? pal::amberInk : pal::textSoft).withMultipliedAlpha (a), juce::Justification::centred);
         }
         if (hasKeyboardFocus (false)) paintFocus (g, r.reduced (1.f), 4.f);
     }
@@ -525,6 +559,7 @@ public:
 private:
     juce::StringArray labels;
     int idx = 0;
+    float boost = 0.f;
 };
 
 //==============================================================================
@@ -660,14 +695,14 @@ inline void drawRegionPart (juce::Graphics& g, int part, juce::Rectangle<float> 
 }
 
 // Chip: rounded outlined label, used for "Hooked up" entries.
-inline int chipWidth (const juce::String& t) { return (int) std::ceil (sans (11.f, true).getStringWidthFloat (t)) + 18; }
+inline int chipWidth (const juce::String& t) { return (int) std::ceil (sans (15.f, true).getStringWidthFloat (t)) + 20; }
 inline void drawChip (juce::Graphics& g, juce::Rectangle<int> r, const juce::String& t)
 {
     g.setColour (pal::amber.withAlpha (0.16f));
-    g.fillRoundedRectangle (r.toFloat(), 11.f);
+    g.fillRoundedRectangle (r.toFloat(), 13.f);
     g.setColour (pal::amber.withAlpha (0.55f));
-    g.drawRoundedRectangle (r.toFloat().reduced (0.5f), 11.f, 1.f);
-    drawText (g, t, r.reduced (8, 0), sans (11.f, true), pal::text, juce::Justification::centred);
+    g.drawRoundedRectangle (r.toFloat().reduced (0.5f), 13.f, 1.f);
+    drawText (g, t, r.reduced (8, 0), sans (15.f, true), pal::text, juce::Justification::centred);
 }
 
 // The painted case: rounded top, seafoam enamel, a brass hairline inside the edge and a few chips.  Drawn once by the editor behind everything.

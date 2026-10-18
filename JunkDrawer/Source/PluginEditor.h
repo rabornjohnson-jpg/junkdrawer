@@ -10,6 +10,7 @@ public:
 
     void paint (juce::Graphics&) override;
     void resized() override;
+    bool keyPressed (const juce::KeyPress&) override;       // Ctrl+Z undo, Ctrl+Y or Ctrl+Shift+Z redo
 
     enum Page { Drawer, Lfos, Master, Matrix, Song, NumPages };
     void showPage (int page);

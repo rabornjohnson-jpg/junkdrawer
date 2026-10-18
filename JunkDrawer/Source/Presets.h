@@ -16,7 +16,7 @@ struct Drawer
 
 inline bool isSoundSpecific (const juce::String& id)
 {
-    if (id == "seq_run" || id == "seq_bpm") return true;
+    if (id == "seq_run" || id == "seq_bpm" || id == "seq_hostbpm") return true;
     if (id.endsWith ("_regions") || id.endsWith ("_tune") || id == "key_root" || id == "key_mode") return true;
     return id.startsWithChar ('t') && id.contains ("_r") && (id.endsWith ("_start") || id.endsWith ("_end"));
 }

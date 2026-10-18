@@ -261,14 +261,14 @@ int main()
 
     onlySteps ({ 0, 2 });
     check (rms (run (sq, 0.2, rate)) < 1.0e-6f, "nothing plays until the sequencer runs");
-    setP (sq, "seq_run", 1.f);
+    (sq.restartPattern(), setP (sq, "seq_run", 1.f));
     o = run (sq, 0.4, rate);
     check (win (o, 0, 600) > 0.05f && win (o, 1500, 11800) < 1.0e-5f, "step 1 plays at the start and then goes quiet");
     check (win (o, 11000, 11900) < 1.0e-5f && win (o, 12100, 12900) > 0.05f, "step 3 starts exactly 12000 samples in");
 
     setP (sq, "seq_run", 0.f);
     run (sq, 0.1, rate);
-    setP (sq, "seq_run", 1.f);
+    (sq.restartPattern(), setP (sq, "seq_run", 1.f));
     onlySteps ({ 0 });
     setP (sq, jd::stepId (0, 0, jd::LaneRatchet), 4.f);
     o = run (sq, 0.2, rate);
@@ -277,7 +277,7 @@ int main()
 
     // chance and timing
     {
-        auto restart = [&] { setP (sq, "seq_run", 0.f); run (sq, 0.1, rate); setP (sq, "seq_run", 1.f); };
+        auto restart = [&] { setP (sq, "seq_run", 0.f); run (sq, 0.1, rate); (sq.restartPattern(), setP (sq, "seq_run", 1.f)); };
         restart();
         onlySteps ({ 2 });
         setP (sq, jd::stepId (0, 2, jd::LaneTime), 0.5f);
@@ -318,7 +318,7 @@ int main()
 
     // region order
     {
-        auto restart = [&] { setP (sq, "seq_run", 0.f); run (sq, 0.1, rate); setP (sq, "seq_run", 1.f); };
+        auto restart = [&] { setP (sq, "seq_run", 0.f); run (sq, 0.1, rate); (sq.restartPattern(), setP (sq, "seq_run", 1.f)); };
         onlySteps ({ 0, 2 });
         for (int mode = 0; mode < 4; ++mode)
         {
@@ -333,7 +333,7 @@ int main()
 
     // pan lane
     {
-        auto restart = [&] { setP (sq, "seq_run", 0.f); run (sq, 0.1, rate); setP (sq, "seq_run", 1.f); };
+        auto restart = [&] { setP (sq, "seq_run", 0.f); run (sq, 0.1, rate); (sq.restartPattern(), setP (sq, "seq_run", 1.f)); };
         onlySteps ({ 0 });
         setP (sq, jd::stepId (0, 0, jd::LanePan), -1.f);
         restart();
@@ -351,7 +351,7 @@ int main()
 
     // per-track sends
     {
-        auto restart = [&] { setP (sq, "seq_run", 0.f); run (sq, 0.1, rate); setP (sq, "seq_run", 1.f); };
+        auto restart = [&] { setP (sq, "seq_run", 0.f); run (sq, 0.1, rate); (sq.restartPattern(), setP (sq, "seq_run", 1.f)); };
         onlySteps ({ 0 });
         setP (sq, "fx_delay_on", 1.f); setP (sq, "fx_delay_mix", 0.f); setP (sq, "fx_delay_time", 250.f); setP (sq, "fx_delay_mode", 0.f); setP (sq, "fx_delay_fb", 0.f);
         setP (sq, "fx_reverb_on", 0.f);
@@ -385,7 +385,7 @@ int main()
 
     // polymeter: each lane loops at its own length
     {
-        auto restart = [&] { setP (sq, "seq_run", 0.f); run (sq, 0.1, rate); setP (sq, "seq_run", 1.f); };
+        auto restart = [&] { setP (sq, "seq_run", 0.f); run (sq, 0.1, rate); (sq.restartPattern(), setP (sq, "seq_run", 1.f)); };
         onlySteps ({ 0, 1, 2, 3, 4, 5, 6, 7 });
         setP (sq, jd::laneLenId (0, jd::LaneVolume), 3.f);
         setP (sq, jd::stepId (0, 0, jd::LaneVolume), 1.f);
@@ -403,7 +403,7 @@ int main()
 
     // region morph
     {
-        auto restart = [&] { setP (sq, "seq_run", 0.f); run (sq, 0.1, rate); setP (sq, "seq_run", 1.f); };
+        auto restart = [&] { setP (sq, "seq_run", 0.f); run (sq, 0.1, rate); (sq.restartPattern(), setP (sq, "seq_run", 1.f)); };
         sq.sliceEqual (0, 2);
         onlySteps ({ 0 });
         setP (sq, jd::trackId (0, "morph"), 0.f);
@@ -428,7 +428,7 @@ int main()
 
     // ratchet shape
     {
-        auto restart = [&] { setP (sq, "seq_run", 0.f); run (sq, 0.1, rate); setP (sq, "seq_run", 1.f); };
+        auto restart = [&] { setP (sq, "seq_run", 0.f); run (sq, 0.1, rate); (sq.restartPattern(), setP (sq, "seq_run", 1.f)); };
         onlySteps ({ 0 });
         setP (sq, jd::stepId (0, 0, jd::LaneRatchet), 4.f);
         setP (sq, jd::trackId (0, "rshape"), 1.f);                            // fade out
@@ -447,7 +447,7 @@ int main()
 
     // ratchet chance, bounce and weighted order
     {
-        auto restart = [&] { setP (sq, "seq_run", 0.f); run (sq, 0.1, rate); setP (sq, "seq_run", 1.f); };
+        auto restart = [&] { setP (sq, "seq_run", 0.f); run (sq, 0.1, rate); (sq.restartPattern(), setP (sq, "seq_run", 1.f)); };
         onlySteps ({ 0 });
         setP (sq, jd::stepId (0, 0, jd::LaneRatchet), 4.f);
         setP (sq, jd::trackId (0, "rshape"), 4.f);                            // bounce: loud, soft, soft, loud
@@ -475,7 +475,7 @@ int main()
 
     // loop conditions (the Region lane is 16 steps, so a pass is 96000 samples at 120 BPM)
     {
-        auto restart = [&] { setP (sq, "seq_run", 0.f); run (sq, 0.1, rate); setP (sq, "seq_run", 1.f); };
+        auto restart = [&] { setP (sq, "seq_run", 0.f); run (sq, 0.1, rate); (sq.restartPattern(), setP (sq, "seq_run", 1.f)); };
         onlySteps ({ 0 });
         setP (sq, jd::trackId (0, "cond"), 1.f);                              // every 2nd loop
         restart();
@@ -495,7 +495,7 @@ int main()
 
     // patterns and the chain
     {
-        auto restart = [&] { setP (sq, "seq_run", 0.f); run (sq, 0.1, rate); setP (sq, "seq_run", 1.f); };
+        auto restart = [&] { setP (sq, "seq_run", 0.f); run (sq, 0.1, rate); (sq.restartPattern(), setP (sq, "seq_run", 1.f)); };
         setP (sq, "seq_run", 0.f);
         sq.setEditPattern (0); onlySteps ({ 0 });
         sq.setEditPattern (1);
@@ -545,21 +545,21 @@ int main()
         setP (sq, "seq_run", 0.f);
     }
 
-    setP (sq, "seq_run", 0.f); run (sq, 0.1, rate); setP (sq, "seq_run", 1.f);
+    setP (sq, "seq_run", 0.f); run (sq, 0.1, rate); (sq.restartPattern(), setP (sq, "seq_run", 1.f));
     onlySteps ({ 0, 1 });
     setP (sq, "m_swing", 0.75f);
     o = run (sq, 0.4, rate);
     check (win (o, 8000, 8950) < 1.0e-5f && win (o, 9100, 9800) > 0.05f, "swing pushes the second step of a pair later (9000 instead of 6000)");
     setP (sq, "m_swing", 0.5f);
 
-    setP (sq, "seq_run", 0.f); run (sq, 0.1, rate); setP (sq, "seq_run", 1.f);
+    setP (sq, "seq_run", 0.f); run (sq, 0.1, rate); (sq.restartPattern(), setP (sq, "seq_run", 1.f));
     setP (sq, "m_rate", 2.f);
     o = run (sq, 0.4, rate);
     check (win (o, 2800, 2990) < 1.0e-5f && win (o, 3100, 3800) > 0.05f, "a rate of 2x makes steps half as long");
     setP (sq, "m_rate", 1.f);
 
     // lanes run on their own lengths: the volume lane has 2 steps while the region lane has 16
-    setP (sq, "seq_run", 0.f); run (sq, 0.1, rate); setP (sq, "seq_run", 1.f);
+    setP (sq, "seq_run", 0.f); run (sq, 0.1, rate); (sq.restartPattern(), setP (sq, "seq_run", 1.f));
     for (int s = 0; s < jd::kSteps; ++s) setP (sq, jd::stepId (0, s, jd::LaneRegion), 1.f);
     setP (sq, jd::laneLenId (0, jd::LaneVolume), 2.f);
     setP (sq, jd::stepId (0, 0, jd::LaneVolume), 1.f);
@@ -568,7 +568,7 @@ int main()
     check (win (o, 100, 900) > 0.05f && win (o, 6100, 6900) < 1.0e-5f && win (o, 12100, 12900) > 0.05f && win (o, 18100, 18900) < 1.0e-5f, "a 2-step volume lane alternates loud and silent against a 16-step region lane");
     setP (sq, jd::laneLenId (0, jd::LaneVolume), 16.f);
 
-    setP (sq, "seq_run", 0.f); run (sq, 0.1, rate); setP (sq, "seq_run", 1.f);
+    setP (sq, "seq_run", 0.f); run (sq, 0.1, rate); (sq.restartPattern(), setP (sq, "seq_run", 1.f));
     setP (sq, jd::laneLenId (0, jd::LaneRegion), 3.f);
     for (int s = 0; s < jd::kSteps; ++s) setP (sq, jd::stepId (0, s, jd::LaneRegion), s == 2 ? 1.f : 0.f);
     o = run (sq, 0.8, rate);
@@ -592,7 +592,7 @@ int main()
         setP (fp, "seq_bpm", 120.f);
         auto hit = [&] (double secs)
         {
-            setP (fp, "seq_run", 0.f); run (fp, 0.2, rate); setP (fp, "seq_run", 1.f);
+            setP (fp, "seq_run", 0.f); run (fp, 0.2, rate); (fp.restartPattern(), setP (fp, "seq_run", 1.f));
             return run (fp, secs, rate);
         };
         auto dry = hit (0.5);
@@ -712,7 +712,7 @@ int main()
         setP (lp, "l1_rate", 2.f); setP (lp, "l1_sync", 0.f); setP (lp, "m_pan", 0.f);
         lp.setMod ("m_pan", 0, 1.f);
         check (lp.getMods().size() == 1 && lp.modAmount ("m_pan", 0) == 1.f, "an assignment is stored");
-        setP (lp, "seq_run", 1.f);
+        (lp.restartPattern(), setP (lp, "seq_run", 1.f));
         auto sw = run (lp, 0.6, rate);
         auto side = [&] (int a, int z, int ch) { double s = 0.0; for (int i = a; i < z; ++i) s += std::abs (sw.getSample (ch, i)); return s; };
         const int q1 = (int) (0.25 * rate / 2.0 * 1.0), q3 = (int) (0.75 * rate / 2.0);       // quarter and three quarters of a 2 Hz cycle
@@ -720,7 +720,7 @@ int main()
         check (side (q3 - 400, q3 + 400, 0) > 4.0 * side (q3 - 400, q3 + 400, 1), "at the bottom of it the sound is in the left ear");
 
         lp.removeMod ("m_pan", 0);
-        setP (lp, "seq_run", 0.f); run (lp, 0.1, rate); setP (lp, "seq_run", 1.f);
+        setP (lp, "seq_run", 0.f); run (lp, 0.1, rate); (lp.restartPattern(), setP (lp, "seq_run", 1.f));
         sw = run (lp, 0.3, rate);
         const double l0 = side (2000, 8000, 0), r0 = side (2000, 8000, 1);
         check (std::abs (l0 - r0) < 0.05 * (l0 + r0) && lp.getMods().empty(), "taking the assignment off puts the pan back in the middle");
@@ -1219,6 +1219,60 @@ int main()
             tmp.deleteRecursively();
         }
         check (proc.getNumPrograms() == proc.drawerCount() && proc.getProgramName (0).isNotEmpty(), "hosts see the drawers as programs");
+    }
+
+    // Play, pause and restart without the host; undo and redo; lane tools
+    {
+        setP (sq, "seq_run", 0.f); run (sq, 0.1, rate);
+        sq.restartPattern(); setP (sq, "seq_run", 1.f);
+        run (sq, 0.55, rate);
+        const long long before = sq.uiStep.load();
+        check (before >= 3 && sq.isPlaying(), "the pattern runs on its own");
+        setP (sq, "seq_run", 0.f); run (sq, 0.2, rate);
+        check (! sq.isPlaying(), "pausing stops it");
+        setP (sq, "seq_run", 1.f); run (sq, 0.02, rate);
+        check (sq.uiStep.load() >= before, "playing again picks up where it stopped");
+        setP (sq, "seq_run", 0.f); run (sq, 0.05, rate);
+        sq.restartPattern(); setP (sq, "seq_run", 1.f); run (sq, 0.02, rate);
+        check (sq.uiStep.load() == 0, "restart goes back to step 1");
+        setP (sq, "seq_run", 0.f); run (sq, 0.05, rate);
+    }
+    {
+        JunkDrawerProcessor u;
+        u.prepareToPlay (rate, 256);
+        auto val = [&] (const char* id) { return u.state.getRawParameterValue (id)->load(); };
+        const float v0 = val ("m_volume");
+        check (! u.history().canUndo() && ! u.history().canRedo(), "a fresh plug-in has nothing to undo");
+        setP (u, "m_volume", -12.f);
+        check (u.history().canUndo(), "a change can be undone");
+        u.history().undo();
+        check (std::abs (val ("m_volume") - v0) < 1.0e-3f, "undo puts the value back");
+        check (u.history().canRedo() && ! u.history().canUndo(), "and the change can be redone");
+        u.history().redo();
+        check (std::abs (val ("m_volume") + 12.f) < 1.0e-2f, "redo brings it back");
+        setP (u, "fx_delay_mix", 0.6f); u.history().undo();
+        check (std::abs (val ("m_volume") + 12.f) < 1.0e-2f && std::abs (val ("fx_delay_mix") - 0.6f) > 0.05f, "undo takes back only the latest change");
+        u.history().redo();
+
+        u.randomizeLane (0, jd::LaneVolume);
+        int changed = 0, otherChanged = 0;
+        for (int st = 0; st < jd::kSteps; ++st)
+        {
+            if (std::abs (val (jd::stepId (0, st, jd::LaneVolume).toRawUTF8()) - 1.f) > 1.0e-3f) ++changed;
+            if (std::abs (val (jd::stepId (0, st, jd::LanePitch).toRawUTF8())) > 1.0e-3f) ++otherChanged;
+        }
+        check (changed > 4 && otherChanged == 0, "randomize rolls only the lane asked for");
+        u.history().undo(); u.history().redo();                       // the roll is now a step of its own
+        u.clearTrackLanes (0);
+        bool plain = true;
+        for (int ln = 0; ln < jd::kLanes; ++ln)
+            for (int st = 0; st < jd::kSteps; ++st)
+                plain = plain && std::abs (val (jd::stepId (0, st, ln).toRawUTF8()) - u.state.getParameter (jd::stepId (0, st, ln))->convertFrom0to1 (u.state.getParameter (jd::stepId (0, st, ln))->getDefaultValue())) < 1.0e-3f;
+        check (plain, "clear puts every step of every lane back to plain");
+        u.history().undo();
+        int back = 0;
+        for (int st = 0; st < jd::kSteps; ++st) if (std::abs (val (jd::stepId (0, st, jd::LaneVolume).toRawUTF8()) - 1.f) > 1.0e-3f) ++back;
+        check (back > 4, "a clear can be undone");
     }
 
     proc.clearTrack (0);

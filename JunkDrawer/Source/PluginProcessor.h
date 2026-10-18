@@ -1,4 +1,5 @@
 #pragma once
+#include "Undo.h"
 #include "Params.h"
 #include "Presets.h"
 #include "Voice.h"
@@ -130,6 +131,12 @@ public:
     }
     /** The tempo and bar length the sequencer last ran at (the host's when there is one), so an export can match what you hear. */
     double lastBpm() const noexcept { return bpmSeen.load(); }
+    /** Start the pattern again from step 1 (when it runs on its own, not from the DAW's play button). */
+    /** The DAW's tempo, or 0 when there is no host tempo (the standalone app). */
+    double hostTempo() const noexcept { return hostBpmSeen.load(); }
+    void restartPattern() noexcept { restartReq.store (true); }
+    /** True while the pattern is playing, from the DAW or on its own. */
+    bool isPlaying() const noexcept { return uiStep.load() >= 0; }
     double lastBeatsPerBar() const noexcept { return barSeen.load(); }
 
     //==========================================================================
@@ -197,7 +204,7 @@ private:
     int preLen = 0, prePos = 0, preFill = 0;
     juce::AudioBuffer<float> recPre;                                   // short ring kept while waiting for sound, so the first hit is not clipped
     double beatsPerBar = 4.0;
-    std::atomic<double> bpmSeen { 120.0 }, barSeen { 4.0 };
+    std::atomic<double> bpmSeen { 120.0 }, barSeen { 4.0 }, hostBpmSeen { 0.0 };
 
     // ---- modulation (audio thread unless noted) ----
     std::vector<jd::Assign> mods;                                      // message thread
@@ -250,7 +257,7 @@ private:
     std::array<std::array<StepPtrs, jd::kSteps>, jd::kTracks> sp {};
     std::array<std::array<std::atomic<float>*, jd::kLanes>, jd::kTracks> laneLen {};
     std::array<std::atomic<float>*, jd::kTracks> regCount {};
-    std::atomic<float> *pDiv = nullptr, *pFeel = nullptr, *pBpm = nullptr, *pRun = nullptr, *pRate = nullptr, *pRateMode = nullptr, *pSwing = nullptr;
+    std::atomic<float> *pDiv = nullptr, *pFeel = nullptr, *pBpm = nullptr, *pRun = nullptr, *pFollow = nullptr, *pRate = nullptr, *pRateMode = nullptr, *pSwing = nullptr;
 
     struct SeqTrack
     {
@@ -268,6 +275,8 @@ private:
     bool sendDelayWas = false, sendVerbWas = false;
     bool wasOn[4] = { false, false, false, false };
     double internalPpq = 0.0;
+    std::unique_ptr<UndoHistory> undoHistory;
+    std::atomic<bool> restartReq { false };
     bool seqWasRunning = false;
     void applyStep (int track, SeqTrack& q, long long step, int pat) const;
     // patterns
@@ -296,6 +305,11 @@ private:
 public:
     // Rummage re-rolls every step of every lane that is not kept. Shake re-rolls only some of them (the Shake amount).
     void rummage (int track)  { rollSteps (track, 1.f); }
+    /** Re-roll just one lane of a track, whatever the Keep switches say. */
+    void randomizeLane (int track, int lane);
+    /** Put every lane of a track back to plain steps. */
+    void clearTrackLanes (int track);
+    UndoHistory& history() noexcept { return *undoHistory; }
     void shake (int track);
 private:
     void rollSteps (int track, float chance);
