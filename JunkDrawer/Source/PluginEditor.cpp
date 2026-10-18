@@ -223,17 +223,7 @@ struct JunkDrawerEditor::Header : juce::Component, juce::Timer, juce::ChangeList
         addAndMakeVisible (reduce);
         assignBtn.getProperties().set ("mint", true);
         assignBtn.setTitle ("Assign an LFO");
-        assignBtn.onClick = [this]
-        {
-            if (ed.proc.armedLfo() >= 0) { ed.proc.setArmedLfo (-1); return; }
-            juce::PopupMenu m;
-            m.addSectionHeader ("Assign which LFO?");
-            for (int i = 0; i < jd::kLfos; ++i) m.addItem (i + 1, "LFO " + juce::String (i + 1));
-            m.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&assignBtn), [this, safe = juce::Component::SafePointer<Header> (this)] (int r)
-            {
-                if (safe != nullptr && r > 0) ed.proc.setArmedLfo (r - 1);
-            });
-        };
+        assignBtn.onClick = [this] { assignClicked(); };
         addAndMakeVisible (assignBtn);
         refreshAssign();
         exportBtn.setButtonText ("Export");
@@ -243,6 +233,18 @@ struct JunkDrawerEditor::Header : juce::Component, juce::Timer, juce::ChangeList
         startTimerHz (4);
     }
 
+    void assignClicked()
+    {
+        if (ed.proc.armedLfo() >= 0) { ed.proc.setArmedLfo (-1); return; }
+        juce::PopupMenu m;
+        m.addSectionHeader ("Assign which LFO?");
+        for (int i = 0; i < jd::kLfos; ++i) m.addItem (i + 1, "LFO " + juce::String (i + 1));
+        juce::Component::SafePointer<Header> safe (this);
+        m.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&assignBtn), [safe] (int r)
+        {
+            if (safe != nullptr && r > 0) safe->ed.proc.setArmedLfo (r - 1);
+        });
+    }
     void refreshAssign()
     {
         const int a = ed.proc.armedLfo();
