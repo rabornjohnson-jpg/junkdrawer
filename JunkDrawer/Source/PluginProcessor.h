@@ -309,6 +309,7 @@ public:
     void randomizeLane (int track, int lane);
     /** Put every lane of a track back to plain steps. */
     void clearTrackLanes (int track);
+    void rotateTrack (int track, int by, int onlyLane = -1);       // slide the pattern left (-) or right (+) by whole steps, wrapping inside each lane's length
     UndoHistory& history() noexcept { return *undoHistory; }
     void shake (int track);
 private:

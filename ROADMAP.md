@@ -167,3 +167,11 @@ Step-lane engine, LFO engine, file loading, DAW recording pipeline. Pull these i
 - **Keyboard and screen readers (Oct 2026):** Tab reaches the header switches, station bar and dial, waveform, step grid, track rows (open track, level fader), LFO tiles, and every segmented/choice control; arrow keys change values and a focus ring shows where you are (thicker in high contrast). Controls have names, roles and spoken values through JUCE's accessibility layer. Not yet tested with a real screen reader (NVDA/Narrator) or in a DAW on Windows; this is not a compliance claim.
 
 - **Test round 1 (Oct 2026, Ray's Windows notes):** Play and Pause work without the DAW's transport (the pattern runs on its own, and picks up where it stopped); Restart goes back to step 1; the Tempo knob now says what it does (DAW or Own, shows the DAW's tempo while following it); Delay Time reads in beats in Sync, Dotted and Triplet; Undo and Redo (header buttons, Ctrl+Z and Ctrl+Y; one drag is one step; loaded sounds are not part of it); Randomize, Clear lane and Clear all under the lane tabs; one step count for every lane of a track; bigger Delay and Reverb send knobs and a bigger Tune knob; bigger text everywhere (nothing under 13 px; Master, LFOs, Matrix, Song and Export larger still); the animation keeps running after switching High contrast on and back (tests check it). The screenshot tool now also reports any text that does not fit its box.
+
+## Test round 2
+- Each LFO panel shows a live level dot and line, moving in Free mode with the DAW stopped.
+- Each assignment chip on an LFO panel has an x; extra ones fold into a "+N" menu that removes them.
+- Pattern shift left/right buttons (Shift-click moves one lane only).
+- Dragging inside a region slides the whole region; a plain click still picks and plays it.
+- Region symbols never vanish: narrow ones shrink and drop to a second row when neighbors crowd the top row.
+- Header "Assign LFO" button works from any page; click again (or press Esc) to stop assigning.

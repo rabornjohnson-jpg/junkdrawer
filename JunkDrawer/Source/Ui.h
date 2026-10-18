@@ -695,6 +695,7 @@ inline void drawRegionPart (juce::Graphics& g, int part, juce::Rectangle<float> 
 }
 
 // Chip: rounded outlined label, used for "Hooked up" entries.
+inline bool reduceMotionOn (juce::AudioProcessorValueTreeState& s) { return (bool) s.state.getProperty ("reduceMotion", false); }
 inline int chipWidth (const juce::String& t) { return (int) std::ceil (sans (15.f, true).getStringWidthFloat (t)) + 20; }
 inline void drawChip (juce::Graphics& g, juce::Rectangle<int> r, const juce::String& t)
 {

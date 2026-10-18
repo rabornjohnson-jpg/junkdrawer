@@ -1275,6 +1275,28 @@ int main()
         check (back > 4, "a clear can be undone");
     }
 
+    {
+        JunkDrawerProcessor u;
+        u.prepareToPlay (rate, 256);
+        auto val = [&] (const juce::String& id) { return u.state.getRawParameterValue (id)->load(); };
+        for (int st = 0; st < jd::kSteps; ++st) setP (u, jd::stepId (0, st, jd::LaneVolume).toRawUTF8(), 0.05f * (float) st);
+        u.rotateTrack (0, 1);
+        check (std::abs (val (jd::stepId (0, 1, jd::LaneVolume)) - 0.f) < 1.0e-4f && std::abs (val (jd::stepId (0, 0, jd::LaneVolume)) - 0.75f) < 1.0e-3f, "shift right slides the pattern and wraps the last step to the front");
+        u.rotateTrack (0, -1);
+        check (std::abs (val (jd::stepId (0, 5, jd::LaneVolume)) - 0.25f) < 1.0e-3f, "shift left puts it back");
+        u.rotateTrack (0, 1, jd::LanePitch);
+        check (std::abs (val (jd::stepId (0, 5, jd::LaneVolume)) - 0.25f) < 1.0e-3f, "shifting one lane leaves the others alone");
+
+        // LFOs keep moving with the transport stopped
+        setP (u, jd::lfoId (0, "sync").toRawUTF8(), 0.f);
+        setP (u, jd::lfoId (0, "rate").toRawUTF8(), 3.f);
+        setP (u, jd::lfoId (0, "depth").toRawUTF8(), 1.f);
+        setP (u, "seq_run", 0.f);
+        float lo = 9.f, hi = -9.f;
+        for (int k = 0; k < 20; ++k) { run (u, 0.02, rate); const float x = u.lfoValue (0); lo = std::min (lo, x); hi = std::max (hi, x); }
+        check (hi - lo > 0.3f, "a free LFO moves while the transport is stopped");
+    }
+
     proc.clearTrack (0);
     check (proc.getTrack (0) == nullptr, "clearing a track empties it");
 

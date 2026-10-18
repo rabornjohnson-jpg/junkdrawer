@@ -741,6 +741,25 @@ void JunkDrawerProcessor::clearTrackLanes (int track)
     sendChangeMessage();
 }
 
+void JunkDrawerProcessor::rotateTrack (int track, int by, int onlyLane)
+{
+    if (track < 0 || track >= jd::kTracks || by == 0) return;
+    for (int ln = 0; ln < jd::kLanes; ++ln)
+    {
+        if (onlyLane >= 0 && ln != onlyLane) continue;
+        const int len = juce::jlimit (1, jd::kSteps, juce::roundToInt (laneLen[(size_t) track][(size_t) ln]->load()));
+        if (len < 2) continue;
+        float old[jd::kSteps];
+        for (int s = 0; s < len; ++s) old[s] = state.getRawParameterValue (jd::stepId (track, s, ln))->load();
+        for (int s = 0; s < len; ++s)
+        {
+            const int from = ((s - by) % len + len) % len;                  // +1 moves everything one step to the right
+            setParam (state, jd::stepId (track, s, ln), old[from]);
+        }
+    }
+    sendChangeMessage();
+}
+
 void JunkDrawerProcessor::shake (int track) { rollSteps (track, state.getRawParameterValue ("shake_amt")->load()); }
 
 //==============================================================================
